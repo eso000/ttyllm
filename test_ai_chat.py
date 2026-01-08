@@ -39,6 +39,52 @@ class TestChat(unittest.TestCase):
         sut = ai_chat.Chat()
         self.assertEqual(sut.get_ai_name(), "AI")
 
+    def test_setter_user_name(self):
+        sut = ai_chat.Chat()
+        sut.set_user_name("TEST")
+        self.assertEqual(sut.get_user_name(), "TEST")
+
+    def test_setter_ai_name(self):
+        sut = ai_chat.Chat()
+        sut.set_ai_name("TEST")
+        self.assertEqual(sut.get_ai_name(), "TEST")
+
+    def test_setter_normal_color(self):
+        sut = ai_chat.Chat()
+        sut.set_normal_color("8b:1")
+        self.assertEqual(sut.get_normal_color(), "\033[31m")
+        sut.set_normal_color("256b:199")
+        self.assertEqual(sut.get_normal_color(), "\033[38;5;199m")
+        sut.set_normal_color("rgb:122;123;144")
+        self.assertEqual(sut.get_normal_color(), "\033[38;2;122;123;144m")
+        with self.assertRaises(ai_chat.ColorCodeExeption) as err:
+            sut.set_normal_color("12")
+        self.assertEqual(str(err.exception), "12 does not fit acceptable formats")
+
+    def test_setter_user_color(self):
+        sut = ai_chat.Chat()
+        sut.set_user_color("8b:1")
+        self.assertEqual(sut.get_user_color(), "\033[31m")
+        sut.set_user_color("256b:199")
+        self.assertEqual(sut.get_user_color(), "\033[38;5;199m")
+        sut.set_user_color("rgb:122;123;144")
+        self.assertEqual(sut.get_user_color(), "\033[38;2;122;123;144m")
+        with self.assertRaises(ai_chat.ColorCodeExeption) as err:
+            sut.set_user_color("12")
+        self.assertEqual(str(err.exception), "12 does not fit acceptable formats")
+
+    def test_setter_ai_color(self):
+        sut = ai_chat.Chat()
+        sut.set_ai_color("8b:1")
+        self.assertEqual(sut.get_ai_color(), "\033[31m")
+        sut.set_ai_color("256b:199")
+        self.assertEqual(sut.get_ai_color(), "\033[38;5;199m")
+        sut.set_ai_color("rgb:122;123;144")
+        self.assertEqual(sut.get_ai_color(), "\033[38;2;122;123;144m")
+        with self.assertRaises(ai_chat.ColorCodeExeption) as err:
+            sut.set_ai_color("12")
+        self.assertEqual(str(err.exception), "12 does not fit acceptable formats")
+
 
 class TestPrint(unittest.TestCase):
     @classmethod
@@ -115,13 +161,47 @@ class TestPrint(unittest.TestCase):
 
 
 class TestChatList(unittest.TestCase):
-    def test_new_buffer(self):
+    def test_get_current_chat(self):
+        sut = ai_chat.ChatList()
+        self.assertEqual(sut.get_current_chat(), sut.chats[sut.current_chat_index])
+
+    def test_get_current_data(self):
+        sut = ai_chat.ChatList()
+        self.assertEqual(
+            sut.get_current_data(), sut.chats[sut.current_chat_index].chat_data
+        )
+
+    def test_creae_new_chat(self):
         sut = ai_chat.ChatList()
         self.assertEqual(sut.current_chat_index, 0)
         self.assertEqual(len(sut.chats), 1)
         sut.creat_new_chat()
         self.assertEqual(len(sut.chats), 2)
         self.assertEqual(sut.current_chat_index, 1)
+
+    def test_previous_chat(self):
+        sut = ai_chat.ChatList()
+        sut.creat_new_chat()
+        self.assertEqual(sut.current_chat_index, 1)
+        sut.previous_chat()
+        self.assertEqual(sut.current_chat_index, 0)
+
+    def test_next_chat(self):
+        sut = ai_chat.ChatList()
+        sut.creat_new_chat()
+        sut.previous_chat()
+        self.assertEqual(sut.current_chat_index, 0)
+        sut.next_chat()
+        self.assertEqual(sut.current_chat_index, 1)
+
+    def test_delete_current_chat(self):
+        sut = ai_chat.ChatList()
+        sut.creat_new_chat()
+        self.assertEqual(sut.current_chat_index, 1)
+        self.assertEqual(len(sut.chats), 2)
+        sut.delete_current_chat()
+        self.assertEqual(sut.current_chat_index, 0)
+        self.assertEqual(len(sut.chats), 1)
 
 
 if __name__ == "__main__":
