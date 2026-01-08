@@ -1,6 +1,11 @@
 import socket
 import json
 import os
+import re
+
+
+class ColorCodeExeption(Exception):
+    pass
 
 
 class Chat:
@@ -18,20 +23,47 @@ class Chat:
             "messages": [],
         }
 
-    def get_normal_color(self):
+    def get_normal_color(self) -> str:
         return self.normal_color
 
-    def get_ai_color(self):
+    def get_ai_color(self) -> str:
         return self.ai_color
 
-    def get_user_color(self):
+    def get_user_color(self) -> str:
         return self.user_color
 
-    def get_user_name(self):
+    def get_user_name(self) -> str:
         return self.user_name
 
-    def get_ai_name(self):
+    def get_ai_name(self) -> str:
         return self.ai_name
+
+    def _process_color(self, value: str) -> str:
+        pattern_8bit = re.compile("^8b:[0-9]$")
+        pattern_256bit = re.compile("^256b:[0-9]{1,3}$")
+        pattern_rgb = re.compile("^rgb:[0-9]{1,3};[0-9]{1,3};[0-9]{1,3}$")
+        if pattern_8bit.match(value):
+            return f"\033[3{value[-1]}m"
+        if pattern_256bit.match(value):
+            return f"\033[38;5;{value[5:]}m"
+        if pattern_rgb.match(value):
+            return f"\033[38;2;{value[4:]}m"
+        raise ColorCodeExeption(f"{value} does not fit acceptable formats")
+
+    def set_normal_color(self, value: str) -> None:
+        self.normal_color = self._process_color(value)
+
+    def set_ai_color(self, value: str) -> None:
+        self.ai_color = self._process_color(value)
+
+    def set_user_color(self, value: str) -> None:
+        self.user_color = self._process_color(value)
+
+    def set_user_name(self, value) -> None:
+        self.user_name = value
+
+    def set_ai_name(self, value: str) -> None:
+        self.ai_name = value
 
 
 class Print:
@@ -203,7 +235,6 @@ class Supervisor:
             {"role": type_, "content": msg}
         )
 
-    # TODO refactor this nightmare
     def get_reply(self, chat: Chat) -> None:
         Print.print_normal(chat, f"{chat.get_ai_name()}:")
         Print.print_ai(chat, "", end="")
@@ -214,47 +245,48 @@ class Supervisor:
         size = -1
         final = ""
         done = False
-        type_ = 0
         chat.chat_data["messages"].append({"role": "assistant", "content": ""})
-        try:
-            while not done:
-                reply = s.recv(1024)
-                lines = reply.decode().split("\n")
-                if lines[0][0] == "0":
-                    continue
 
-                if type_ != 0:
-                    final = lines[1]
-                else:
-                    for line in lines:
-                        if "application/json" in line:
-                            type_ = 0
-                        if "application/x-ndjson" in line:
-                            type_ = 1
-                        if line == "":
-                            final += lines[5]
-                            break
-                        if "Content-Length:" in line:
-                            size = int(line[15::])
-                            final = lines[5]
-                            while len(final) < size:
-                                final += s.recv(1024).decode()
-                        if "Transfer-Encoding: chunked" in line:
-                            final += lines[6]
-                            if type_ == 1:
-                                break
-                            while True:
-                                lines = s.recv(1024).decode().split("\n")
-                                final += lines[0]
-                                if len(lines) > 1 and lines[1][0] == "0":
-                                    break
-                done = json.loads(final)["done"]
-                msg = json.loads(final)["message"]["content"]
+        reply = s.recv(124)
+        raw = reply.decode().split("\r\n\r\n")
+        try:
+            if "HTTP/1.1 200 OK" not in raw[0]:
+                return
+            if "Content-Type: application/x-ndjson" in raw[0]:
+                body = raw[1].split("\n")
+                size = int(body[0], 16)
+                final = body[1].encode()
+                while len(final) < size:
+                    final += s.recv(124)
+                body[1] = final.decode()
+                done = json.loads(body[1])["done"]
+                msg = json.loads(body[1])["message"]["content"]
                 chat.chat_data["messages"][-1]["content"] += msg
-                print(msg, end="", flush=True)
-            print("")
+                Print.print_ai(chat, msg, end="")
+                while not done:
+                    body = s.recv(124).decode().split("\n")
+                    size = int(body[0], 16)
+                    final = body[1].encode()
+                    while len(final) < size:
+                        final += s.recv(124)
+                    body[1] = final.decode()
+                    done = json.loads(body[1])["done"]
+                    msg = json.loads(body[1])["message"]["content"]
+                    chat.chat_data["messages"][-1]["content"] += msg
+                    Print.print_ai(chat, msg, end="")
+            if "Content-Type: application/json;" in raw[0]:
+                length = raw[0][raw[0].find("Content-Length: ") :]
+                length = length[: max(len(length), length.find("\n"))]
+                size = int(length[15::])
+                final = raw[1].encode()
+                while len(final) < size:
+                    final += s.recv(124)
+                msg = json.loads(final.decode())["message"]["content"]
+                chat.chat_data["messages"][-1]["content"] += msg
+                Print.print_ai(chat, msg, end="")
         except KeyboardInterrupt:
             pass
+        print("")
         s.close()
 
     def process_command(self, command: str) -> bool:
