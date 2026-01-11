@@ -242,12 +242,9 @@ class Supervisor:
         s.connect((self.host, self.port))
         s.send(self.make_post(chat.chat_data).encode())
 
-        size = -1
-        final = ""
-        done = False
         chat.chat_data["messages"].append({"role": "assistant", "content": ""})
-
-        reply = s.recv(124)
+        max_recv = 124
+        reply = s.recv(max_recv)
         raw = reply.decode().split("\r\n\r\n")
         try:
             if "HTTP/1.1 200 OK" not in raw[0]:
@@ -257,18 +254,18 @@ class Supervisor:
                 size = int(body[0], 16)
                 final = body[1].encode()
                 while len(final) < size:
-                    final += s.recv(124)
+                    final += s.recv(min(max_recv, size - len(final) + 2))
                 body[1] = final.decode()
                 done = json.loads(body[1])["done"]
                 msg = json.loads(body[1])["message"]["content"]
                 chat.chat_data["messages"][-1]["content"] += msg
                 Print.print_ai(chat, msg, end="")
                 while not done:
-                    body = s.recv(124).decode().split("\n")
+                    body = s.recv(max_recv).decode().split("\n")
                     size = int(body[0], 16)
                     final = body[1].encode()
                     while len(final) < size:
-                        final += s.recv(124)
+                        final += s.recv(min(max_recv, size - len(final) + 2))
                     body[1] = final.decode()
                     done = json.loads(body[1])["done"]
                     msg = json.loads(body[1])["message"]["content"]
@@ -280,7 +277,7 @@ class Supervisor:
                 size = int(length[15::])
                 final = raw[1].encode()
                 while len(final) < size:
-                    final += s.recv(124)
+                    final += s.recv(min(max_recv, size - len(final)))
                 msg = json.loads(final.decode())["message"]["content"]
                 chat.chat_data["messages"][-1]["content"] += msg
                 Print.print_ai(chat, msg, end="")
