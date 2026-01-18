@@ -10,11 +10,11 @@ class ColorCodeExeption(Exception):
 
 class Chat:
     def __init__(self):
-        self.ai_name = "AI"
-        self.user_name = "You"
-        self.ai_color = "\033[35m"
-        self.user_color = "\033[36m"
-        self.normal_color = "\033[37m"
+        self._ai_name = "AI"
+        self._user_name = "You"
+        self._ai_color = "\033[35m"
+        self._user_color = "\033[36m"
+        self._normal_color = "\033[37m"
 
         self.chat_data = {
             "model": "mistral-nemo",
@@ -24,19 +24,19 @@ class Chat:
         }
 
     def get_normal_color(self) -> str:
-        return self.normal_color
+        return self._normal_color
 
     def get_ai_color(self) -> str:
-        return self.ai_color
+        return self._ai_color
 
     def get_user_color(self) -> str:
-        return self.user_color
+        return self._user_color
 
     def get_user_name(self) -> str:
-        return self.user_name
+        return self._user_name
 
     def get_ai_name(self) -> str:
-        return self.ai_name
+        return self._ai_name
 
     def _process_color(self, value: str) -> str:
         pattern_8bit = re.compile("^8b:[0-9]$")
@@ -51,19 +51,19 @@ class Chat:
         raise ColorCodeExeption(f"{value} does not fit acceptable formats")
 
     def set_normal_color(self, value: str) -> None:
-        self.normal_color = self._process_color(value)
+        self._normal_color = self._process_color(value)
 
     def set_ai_color(self, value: str) -> None:
-        self.ai_color = self._process_color(value)
+        self._ai_color = self._process_color(value)
 
     def set_user_color(self, value: str) -> None:
-        self.user_color = self._process_color(value)
+        self._user_color = self._process_color(value)
 
     def set_user_name(self, value) -> None:
-        self.user_name = value
+        self._user_name = value
 
     def set_ai_name(self, value: str) -> None:
-        self.ai_name = value
+        self._ai_name = value
 
 
 class Print:
@@ -153,8 +153,88 @@ class ChatList:
             self.current_chat_index -= 1
 
 
+class Requester:
+    def __init__(self, host="127.0.0.1", port=11434):
+        self.max_recv = 124
+        self._host = host
+        self._port = port
+
+    def set_endpoint(self, host, port) -> None:
+        self._host = host
+        self._port = port
+
+    def get_endpoint(self) -> tuple(str, int):
+        return (self._host, self._port)
+
+    def _make_post(self, d) -> str:
+        body = json.dumps(d)
+        headers = [
+            "POST /api/chat HTTP/1.1",
+            f"HOST: {self._host}",
+            "Content-Type: application/json",
+            f"Content-Length: {len(body)}",
+        ]
+
+        request = "\r\n".join(headers) + "\r\n\r\n" + body
+
+        return request
+
+    def _get_all(self, final, size, socket_):
+        while len(final) < size:
+            final += socket_.recv(min(self.max_recv, size - len(final)))
+        return final
+
+    def get_reply(self, chat: Chat) -> None:
+        Print.print_normal(chat, f"{chat.get_ai_name()}:")
+        Print.print_ai(chat, "", end="")
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.connect((self._host, self._port))
+        s.send(self._make_post(chat.chat_data).encode())
+
+        chat.chat_data["messages"].append({"role": "assistant", "content": ""})
+        reply = s.recv(self.max_recv)
+        raw = reply.decode().split("\r\n\r\n")
+        try:
+            if "HTTP/1.1 200 OK" not in raw[0]:
+                return
+            if "Content-Type: application/x-ndjson" in raw[0]:
+                body = raw[1].split("\n")
+                size = int(body[0], 16)
+                final = body[1].encode()
+                final = self._get_all(final, size + 2, s)
+                body[1] = final.decode()
+                done = json.loads(body[1])["done"]
+                msg = json.loads(body[1])["message"]["content"]
+                chat.chat_data["messages"][-1]["content"] += msg
+                Print.print_ai(chat, msg, end="")
+                while not done:
+                    body = s.recv(self.max_recv).decode().split("\n")
+                    size = int(body[0], 16)
+                    final = body[1].encode()
+                    final = self._get_all(final, size + 2, s)
+                    body[1] = final.decode()
+                    done = json.loads(body[1])["done"]
+                    msg = json.loads(body[1])["message"]["content"]
+                    chat.chat_data["messages"][-1]["content"] += msg
+                    Print.print_ai(chat, msg, end="")
+            if "Content-Type: application/json;" in raw[0]:
+                length = raw[0][raw[0].find("Content-Length: ") :]
+                length = length[: max(len(length), length.find("\n"))]
+                size = int(length[15::])
+                final = raw[1].encode()
+                final += s.recv(min(self.max_recv, size - len(final)))
+                msg = json.loads(final.decode())["message"]["content"]
+                chat.chat_data["messages"][-1]["content"] += msg
+                Print.print_ai(chat, msg, end="")
+        except KeyboardInterrupt:
+            pass
+        print("")
+        s.close()
+
+
 class Supervisor:
     def __init__(self) -> None:
+        self.requester = Requester()
         self.chat_list = ChatList()
         self.commands = {
             "/d": self.print_data,
@@ -169,8 +249,6 @@ class Supervisor:
             "/bd": self.buffer_delete,
             "/sm": self.set_model,
         }
-        self.host = "127.0.0.1"
-        self.port = 11434
 
     def reprint(self) -> None:
         Print.reprint(self.chat_list.get_current_chat())
@@ -185,14 +263,14 @@ class Supervisor:
         if self.chat_list.get_current_data()["messages"][-1]["role"] == "assistant":
             self.chat_list.get_current_data()["messages"].pop()
             self.reprint()
-            self.get_reply(self.chat_list.get_current_chat())
+            self.requester.get_reply(self.chat_list.get_current_chat())
 
     def rewrite(self) -> None:
         if self.chat_list.get_current_data()["messages"][-1]["role"] == "assistant":
             self.chat_list.get_current_data()["messages"].pop()
             self.chat_list.get_current_data()["messages"].pop()
             self.reprint()
-            self.get_reply(self.chat_list.get_current_chat())
+            self.requester.get_reply(self.chat_list.get_current_chat())
 
     def restart(self) -> None:
         self.chat_list.get_current_data()["messages"] = []
@@ -217,74 +295,10 @@ class Supervisor:
     def set_model(self, model: str) -> None:
         self.chat_list.get_current_data()["model"] = model
 
-    def make_post(self, d) -> str:
-        body = json.dumps(d)
-        headers = [
-            "POST /api/chat HTTP/1.1",
-            f"HOST: {self.host}",
-            "Content-Type: application/json",
-            f"Content-Length: {len(body)}",
-        ]
-
-        request = "\r\n".join(headers) + "\r\n\r\n" + body
-
-        return request
-
     def add_massage(self, msg, type_) -> None:
         self.chat_list.get_current_data()["messages"].append(
             {"role": type_, "content": msg}
         )
-
-    def get_reply(self, chat: Chat) -> None:
-        Print.print_normal(chat, f"{chat.get_ai_name()}:")
-        Print.print_ai(chat, "", end="")
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.connect((self.host, self.port))
-        s.send(self.make_post(chat.chat_data).encode())
-
-        chat.chat_data["messages"].append({"role": "assistant", "content": ""})
-        max_recv = 124
-        reply = s.recv(max_recv)
-        raw = reply.decode().split("\r\n\r\n")
-        try:
-            if "HTTP/1.1 200 OK" not in raw[0]:
-                return
-            if "Content-Type: application/x-ndjson" in raw[0]:
-                body = raw[1].split("\n")
-                size = int(body[0], 16)
-                final = body[1].encode()
-                while len(final) < size:
-                    final += s.recv(min(max_recv, size - len(final) + 2))
-                body[1] = final.decode()
-                done = json.loads(body[1])["done"]
-                msg = json.loads(body[1])["message"]["content"]
-                chat.chat_data["messages"][-1]["content"] += msg
-                Print.print_ai(chat, msg, end="")
-                while not done:
-                    body = s.recv(max_recv).decode().split("\n")
-                    size = int(body[0], 16)
-                    final = body[1].encode()
-                    while len(final) < size:
-                        final += s.recv(min(max_recv, size - len(final) + 2))
-                    body[1] = final.decode()
-                    done = json.loads(body[1])["done"]
-                    msg = json.loads(body[1])["message"]["content"]
-                    chat.chat_data["messages"][-1]["content"] += msg
-                    Print.print_ai(chat, msg, end="")
-            if "Content-Type: application/json;" in raw[0]:
-                length = raw[0][raw[0].find("Content-Length: ") :]
-                length = length[: max(len(length), length.find("\n"))]
-                size = int(length[15::])
-                final = raw[1].encode()
-                while len(final) < size:
-                    final += s.recv(min(max_recv, size - len(final)))
-                msg = json.loads(final.decode())["message"]["content"]
-                chat.chat_data["messages"][-1]["content"] += msg
-                Print.print_ai(chat, msg, end="")
-        except KeyboardInterrupt:
-            pass
-        print("")
-        s.close()
 
     def process_command(self, command: str) -> bool:
         command = command.split(" ")
@@ -328,12 +342,15 @@ class Supervisor:
                 Print.print_user(self.chat_list.get_current_chat(), "", end="")
                 input_ = input().replace("\\n", "\n")
 
+                if len(input_) == 0:
+                    self.reprint()
+                    continue
                 if input_[0] == "/":
                     if self.process_command(input_):
                         break
                 else:
                     self.add_massage(input_, "user")
-                    self.get_reply(self.chat_list.get_current_chat())
+                    self.requester.get_reply(self.chat_list.get_current_chat())
             except (KeyboardInterrupt, UnicodeDecodeError) as e:
                 if isinstance(e, UnicodeDecodeError):
                     Print.print_normal(
