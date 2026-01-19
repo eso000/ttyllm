@@ -21,68 +21,68 @@ class Capturer:
 class TestChat(unittest.TestCase):
     def test_getter_normal_color(self):
         sut = ai_chat.Chat()
-        self.assertEqual(sut.get_normal_color(), "\033[37m")
+        self.assertEqual(sut.normal_color, "\033[37m")
 
     def test_getter_user_color(self):
         sut = ai_chat.Chat()
-        self.assertEqual(sut.get_user_color(), "\033[36m")
+        self.assertEqual(sut.user_color, "\033[36m")
 
     def test_getter_ai_color(self):
         sut = ai_chat.Chat()
-        self.assertEqual(sut.get_ai_color(), "\033[35m")
+        self.assertEqual(sut.ai_color, "\033[35m")
 
     def test_getter_user_name(self):
         sut = ai_chat.Chat()
-        self.assertEqual(sut.get_user_name(), "You")
+        self.assertEqual(sut.user_name, "You")
 
     def test_getter_ai_name(self):
         sut = ai_chat.Chat()
-        self.assertEqual(sut.get_ai_name(), "AI")
+        self.assertEqual(sut.ai_name, "AI")
 
     def test_setter_user_name(self):
         sut = ai_chat.Chat()
-        sut.set_user_name("TEST")
-        self.assertEqual(sut.get_user_name(), "TEST")
+        sut.user_name = "TEST"
+        self.assertEqual(sut.user_name, "TEST")
 
     def test_setter_ai_name(self):
         sut = ai_chat.Chat()
-        sut.set_ai_name("TEST")
-        self.assertEqual(sut.get_ai_name(), "TEST")
+        sut.ai_name = "TEST"
+        self.assertEqual(sut.ai_name, "TEST")
 
     def test_setter_normal_color(self):
         sut = ai_chat.Chat()
-        sut.set_normal_color("8b:1")
-        self.assertEqual(sut.get_normal_color(), "\033[31m")
-        sut.set_normal_color("256b:199")
-        self.assertEqual(sut.get_normal_color(), "\033[38;5;199m")
-        sut.set_normal_color("rgb:122;123;144")
-        self.assertEqual(sut.get_normal_color(), "\033[38;2;122;123;144m")
+        sut.normal_color = "8b:1"
+        self.assertEqual(sut.normal_color, "\033[31m")
+        sut.normal_color = "256b:199"
+        self.assertEqual(sut.normal_color, "\033[38;5;199m")
+        sut.normal_color = "rgb:122;123;144"
+        self.assertEqual(sut.normal_color, "\033[38;2;122;123;144m")
         with self.assertRaises(ai_chat.ColorCodeExeption) as err:
-            sut.set_normal_color("12")
+            sut.normal_color = "12"
         self.assertEqual(str(err.exception), "12 does not fit acceptable formats")
 
     def test_setter_user_color(self):
         sut = ai_chat.Chat()
-        sut.set_user_color("8b:1")
-        self.assertEqual(sut.get_user_color(), "\033[31m")
-        sut.set_user_color("256b:199")
-        self.assertEqual(sut.get_user_color(), "\033[38;5;199m")
-        sut.set_user_color("rgb:122;123;144")
-        self.assertEqual(sut.get_user_color(), "\033[38;2;122;123;144m")
+        sut.user_color = "8b:1"
+        self.assertEqual(sut.user_color, "\033[31m")
+        sut.user_color = "256b:199"
+        self.assertEqual(sut.user_color, "\033[38;5;199m")
+        sut.user_color = "rgb:122;123;144"
+        self.assertEqual(sut.user_color, "\033[38;2;122;123;144m")
         with self.assertRaises(ai_chat.ColorCodeExeption) as err:
-            sut.set_user_color("12")
+            sut.user_color = "12"
         self.assertEqual(str(err.exception), "12 does not fit acceptable formats")
 
     def test_setter_ai_color(self):
         sut = ai_chat.Chat()
-        sut.set_ai_color("8b:1")
-        self.assertEqual(sut.get_ai_color(), "\033[31m")
-        sut.set_ai_color("256b:199")
-        self.assertEqual(sut.get_ai_color(), "\033[38;5;199m")
-        sut.set_ai_color("rgb:122;123;144")
-        self.assertEqual(sut.get_ai_color(), "\033[38;2;122;123;144m")
+        sut.ai_color = "8b:1"
+        self.assertEqual(sut.ai_color, "\033[31m")
+        sut.ai_color = "256b:199"
+        self.assertEqual(sut.ai_color, "\033[38;5;199m")
+        sut.ai_color = "rgb:122;123;144"
+        self.assertEqual(sut.ai_color, "\033[38;2;122;123;144m")
         with self.assertRaises(ai_chat.ColorCodeExeption) as err:
-            sut.set_ai_color("12")
+            sut.ai_color = "12"
         self.assertEqual(str(err.exception), "12 does not fit acceptable formats")
 
 
@@ -163,13 +163,11 @@ class TestPrint(unittest.TestCase):
 class TestChatList(unittest.TestCase):
     def test_get_current_chat(self):
         sut = ai_chat.ChatList()
-        self.assertEqual(sut.get_current_chat(), sut.chats[sut.current_chat_index])
+        self.assertEqual(sut.current_chat, sut.chats[sut.current_chat_index])
 
     def test_get_current_data(self):
         sut = ai_chat.ChatList()
-        self.assertEqual(
-            sut.get_current_data(), sut.chats[sut.current_chat_index].chat_data
-        )
+        self.assertEqual(sut.current_data, sut.chats[sut.current_chat_index].chat_data)
 
     def test_creae_new_chat(self):
         sut = ai_chat.ChatList()

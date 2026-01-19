@@ -23,19 +23,24 @@ class Chat:
             "messages": [],
         }
 
-    def get_normal_color(self) -> str:
+    @property
+    def normal_color(self) -> str:
         return self._normal_color
 
-    def get_ai_color(self) -> str:
+    @property
+    def ai_color(self) -> str:
         return self._ai_color
 
-    def get_user_color(self) -> str:
+    @property
+    def user_color(self) -> str:
         return self._user_color
 
-    def get_user_name(self) -> str:
+    @property
+    def user_name(self) -> str:
         return self._user_name
 
-    def get_ai_name(self) -> str:
+    @property
+    def ai_name(self) -> str:
         return self._ai_name
 
     def _process_color(self, value: str) -> str:
@@ -50,19 +55,24 @@ class Chat:
             return f"\033[38;2;{value[4:]}m"
         raise ColorCodeExeption(f"{value} does not fit acceptable formats")
 
-    def set_normal_color(self, value: str) -> None:
+    @normal_color.setter
+    def normal_color(self, value: str) -> None:
         self._normal_color = self._process_color(value)
 
-    def set_ai_color(self, value: str) -> None:
+    @ai_color.setter
+    def ai_color(self, value: str) -> None:
         self._ai_color = self._process_color(value)
 
-    def set_user_color(self, value: str) -> None:
+    @user_color.setter
+    def user_color(self, value: str) -> None:
         self._user_color = self._process_color(value)
 
-    def set_user_name(self, value) -> None:
+    @user_name.setter
+    def user_name(self, value) -> None:
         self._user_name = value
 
-    def set_ai_name(self, value: str) -> None:
+    @ai_name.setter
+    def ai_name(self, value: str) -> None:
         self._ai_name = value
 
 
@@ -76,7 +86,7 @@ class Print:
     @staticmethod
     def print_normal(chat: Chat, string: str, end="\n"):
         print(
-            f"{chat.get_normal_color()}{string}",
+            f"{chat.normal_color}{string}",
             end=end,
             flush=True,
         )
@@ -84,7 +94,7 @@ class Print:
     @staticmethod
     def print_ai(chat: Chat, string: str, end="\n"):
         print(
-            f"{chat.get_ai_color()}{string}",
+            f"{chat.ai_color}{string}",
             end=end,
             flush=True,
         )
@@ -92,7 +102,7 @@ class Print:
     @staticmethod
     def print_user(chat: Chat, string: str, end="\n"):
         print(
-            f"{chat.get_user_color()}{string}",
+            f"{chat.user_color}{string}",
             end=end,
             flush=True,
         )
@@ -102,10 +112,10 @@ class Print:
         Print.clean_screan()
         for msg_ in chat.chat_data["messages"]:
             if msg_["role"] == "user":
-                Print.print_normal(chat, f"{chat.get_user_name()}:")
+                Print.print_normal(chat, f"{chat.user_name}:")
                 Print.print_user(chat, msg_["content"])
             if msg_["role"] == "assistant":
-                Print.print_normal(chat, f"{chat.get_ai_name()}:")
+                Print.print_normal(chat, f"{chat.ai_name}:")
                 Print.print_ai(chat, msg_["content"])
 
     @staticmethod
@@ -127,10 +137,12 @@ class ChatList:
         self.chats = [Chat()]
         self.current_chat_index = 0
 
-    def get_current_chat(self):
+    @property
+    def current_chat(self):
         return self.chats[self.current_chat_index]
 
-    def get_current_data(self):
+    @property
+    def current_data(self):
         return self.chats[self.current_chat_index].chat_data
 
     def creat_new_chat(self) -> None:
@@ -159,12 +171,14 @@ class Requester:
         self._host = host
         self._port = port
 
-    def set_endpoint(self, host, port) -> None:
+    @property
+    def endpoint(self) -> tuple(str, int):
+        return (self._host, self._port)
+
+    @endpoint.setter
+    def endpoint(self, host, port) -> None:
         self._host = host
         self._port = port
-
-    def get_endpoint(self) -> tuple(str, int):
-        return (self._host, self._port)
 
     def _make_post(self, d) -> str:
         body = json.dumps(d)
@@ -185,7 +199,7 @@ class Requester:
         return final
 
     def get_reply(self, chat: Chat) -> None:
-        Print.print_normal(chat, f"{chat.get_ai_name()}:")
+        Print.print_normal(chat, f"{chat.ai_name}:")
         Print.print_ai(chat, "", end="")
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.connect((self._host, self._port))
@@ -251,54 +265,51 @@ class Supervisor:
         }
 
     def reprint(self) -> None:
-        Print.reprint(self.chat_list.get_current_chat())
+        Print.reprint(self.chat_list.current_chat)
 
     def print_data(self) -> None:
-        Print.print_data(self.chat_list.get_current_chat())
+        Print.print_data(self.chat_list.current_chat)
 
     def print_messages(self) -> None:
-        Print.print_messages(self.chat_list.get_current_chat())
+        Print.print_messages(self.chat_list.current_chat)
 
     def redo(self) -> None:
-        if self.chat_list.get_current_data()["messages"][-1]["role"] == "assistant":
-            self.chat_list.get_current_data()["messages"].pop()
+        if self.chat_list.current_data["messages"][-1]["role"] == "assistant":
+            self.chat_list.current_data["messages"].pop()
             self.reprint()
-            self.requester.get_reply(self.chat_list.get_current_chat())
+            self.requester.get_reply(self.chat_list.current_chat)
 
     def rewrite(self) -> None:
-        if self.chat_list.get_current_data()["messages"][-1]["role"] == "assistant":
-            self.chat_list.get_current_data()["messages"].pop()
-            self.chat_list.get_current_data()["messages"].pop()
+        if self.chat_list.current_data["messages"][-1]["role"] == "assistant":
+            self.chat_list.current_data["messages"].pop()
+            self.chat_list.current_data["messages"].pop()
             self.reprint()
-            self.requester.get_reply(self.chat_list.get_current_chat())
 
     def restart(self) -> None:
-        self.chat_list.get_current_data()["messages"] = []
+        self.chat_list.current_data["messages"] = []
         self.reprint()
 
     def buffer_create(self) -> None:
         self.chat_list.creat_new_chat()
-        Print.reprint(self.chat_list.get_current_chat())
+        Print.reprint(self.chat_list.current_chat)
 
     def buffer_previous(self) -> None:
         self.chat_list.previous_chat()
-        Print.reprint(self.chat_list.get_current_chat())
+        Print.reprint(self.chat_list.current_chat)
 
     def buffer_next(self) -> None:
         self.chat_list.next_chat()
-        Print.reprint(self.chat_list.get_current_chat())
+        Print.reprint(self.chat_list.current_chat)
 
     def buffer_delete(self) -> None:
         self.chat_list.delete_current_chat()
-        Print.reprint(self.chat_list.get_current_chat())
+        Print.reprint(self.chat_list.current_chat)
 
     def set_model(self, model: str) -> None:
-        self.chat_list.get_current_data()["model"] = model
+        self.chat_list.current_data["model"] = model
 
     def add_massage(self, msg, type_) -> None:
-        self.chat_list.get_current_data()["messages"].append(
-            {"role": type_, "content": msg}
-        )
+        self.chat_list.current_data["messages"].append({"role": type_, "content": msg})
 
     def process_command(self, command: str) -> bool:
         command = command.split(" ")
@@ -306,7 +317,7 @@ class Supervisor:
             return True
         if command[0] not in self.commands:
             Print.print_normal(
-                self.chat_list.get_current_chat(), f"Unknown command: {command[0]}"
+                self.chat_list.current_chat, f"Unknown command: {command[0]}"
             )
             return False
         self.commands[command[0]](*command[1:])
@@ -316,10 +327,8 @@ class Supervisor:
         Print.clean_screan()
         while True:
             try:
-                if len(self.chat_list.get_current_data()["messages"]) == 0:
-                    Print.print_normal(
-                        self.chat_list.get_current_chat(), "system message"
-                    )
+                if len(self.chat_list.current_data["messages"]) == 0:
+                    Print.print_normal(self.chat_list.current_chat, "system message")
                     input_ = input().replace("\\n", "\n")
                     if input_[0:2] == "/o":
                         if os.path.isfile(input_[2::]):
@@ -328,7 +337,7 @@ class Supervisor:
                                 self.add_massage(string, "system")
                         else:
                             Print.print_normal(
-                                self.chat_list.get_current_chat(), "no such file"
+                                self.chat_list.current_chat, "no such file"
                             )
                     else:
                         self.add_massage(input_, "system")
@@ -336,10 +345,10 @@ class Supervisor:
                     continue
 
                 Print.print_normal(
-                    self.chat_list.get_current_chat(),
-                    f"{self.chat_list.get_current_chat().get_user_name()}:",
+                    self.chat_list.current_chat,
+                    f"{self.chat_list.current_chat.user_name}:",
                 )
-                Print.print_user(self.chat_list.get_current_chat(), "", end="")
+                Print.print_user(self.chat_list.current_chat, "", end="")
                 input_ = input().replace("\\n", "\n")
 
                 if len(input_) == 0:
@@ -350,12 +359,10 @@ class Supervisor:
                         break
                 else:
                     self.add_massage(input_, "user")
-                    self.requester.get_reply(self.chat_list.get_current_chat())
+                    self.requester.get_reply(self.chat_list.current_chat)
             except (KeyboardInterrupt, UnicodeDecodeError) as e:
                 if isinstance(e, UnicodeDecodeError):
-                    Print.print_normal(
-                        self.chat_list.get_current_chat(), "input too large"
-                    )
+                    Print.print_normal(self.chat_list.current_chat, "input too large")
                 continue
 
         Print.clean_screan()
