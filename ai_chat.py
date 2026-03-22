@@ -5,6 +5,10 @@ import re
 import sys
 import tty
 import termios
+import threading
+import select
+
+canceled = False
 
 
 class ColorCodeExeption(Exception):
@@ -22,6 +26,7 @@ class Buffer:
         self.ai_color = "\033[35m"
         self.user_color = "\033[36m"
         self.normal_color = "\033[37m"
+        self.cancel = False
 
         self.chat_data = {
             "model": "mistral-nemo",
@@ -124,6 +129,8 @@ class Requester:
         return final
 
     def get_reply(self, chat: Buffer) -> None:
+        chat.cancel = False
+
         chat.print_normal(f"{chat.ai_name}:")
         chat.print_ai("", end="")
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -147,7 +154,7 @@ class Requester:
                 msg = msg.replace("\n", "\r\n")
                 chat.chat_data["messages"][-1]["content"] += msg
                 chat.print_ai(msg, end="")
-                while not done:
+                while not done and not chat.cancel:
                     body = s.recv(self.max_recv).decode().split("\n")
                     size = int(body[0], 16)
                     final = body[1].encode()
@@ -179,6 +186,15 @@ class Supervisor:
         self.buffers = [Buffer()]
         self.current_buffer_id = 0
         self.requester = Requester()
+        self.run = True
+
+        self.input_ = []
+        self.input_open = True
+        self.input_done = False
+        self.input_lock = threading.Lock()
+        self.input_cond = threading.Condition()
+        self.input_thread = threading.Thread(target=self.get_input)
+        self.input_thread.start()
 
     @property
     def current_buffer(self):
@@ -187,6 +203,21 @@ class Supervisor:
     @property
     def current_data(self):
         return self.current_buffer.chat_data
+
+    @property
+    def input(self):
+        with self.input_cond:
+            while self.input_done == False:
+                self.input_cond.wait()
+            self.input_done = False
+            self.input_open = True
+            res = "".join(self.input_)
+            self.input_ = []
+            return res
+
+    def handle_sigint(self, sigint, frame):
+        print("cancell")
+        self.current_buffer.cancel = True
 
     def add_massage(self, msg, type_) -> None:
         self.current_data["messages"].append({"role": type_, "content": msg})
@@ -206,7 +237,11 @@ class Supervisor:
                 if self.current_data["messages"][-1]["role"] == "assistant":
                     self.current_data["messages"].pop()
                     self.current_buffer.reprint()
+                    with self.input_cond:
+                        self.input_open = False
                     self.requester.get_reply(self.current_buffer)
+                    with self.input_cond:
+                        self.input_open = True
             case "/R":
                 self.current_data["messages"] = []
                 self.current_buffer.reprint()
@@ -242,24 +277,31 @@ class Supervisor:
         return True
 
     def get_input(self):
-        new_input = []
-        while True:
-            ch = sys.stdin.read(1)
-            if not ch or ch == "\r" or ch == "\n":
-                print("", end="\n\r")
-                return "".join(new_input)
-            if ord(ch) == 127:
-                print("\b", end="", flush=True)
-                new_input.pop(-1)
-                continue
-            new_input.append(ch)
-            print(ch, end="", flush=True)
-        print("", end="\n\r")
-        return "".join(new_input)
+        while self.run:
+            # TODO: ad pipe to remove the timeout
+            r, _, _ = select.select([sys.stdin], [], [], 0.5)
+            if sys.stdin in r:
+                ch = sys.stdin.read(1)
+                with self.input_cond:
+                    if ord(ch) == 3:
+                        self.handle_sigint(0, 0)
+                    if not ch or ch == "\r" or ch == "\n":
+                        print("", end="\n\r")
+                        self.input_open = False
+                        self.input_done = True
+                        self.input_cond.notify()
+                    if ord(ch) == 127:
+                        if len(self.input_) > 0:
+                            print("\b \b", end="", flush=True)
+                            self.input_.pop(-1)
+                        continue
+                    if self.input_open:
+                        self.input_.append(ch)
+                        print(ch, end="", flush=True)
 
     def handle_empy_buffer(self):
         self.current_buffer.print_normal("system message")
-        input_ = self.get_input().replace("\\n", "\n\r")
+        input_ = self.input.replace("\\n", "\n\r")
         if input_[0:2] == "/o":
             if os.path.isfile(input_[2::]):
                 with open(input_[2::], encoding="utf-8") as file:
@@ -276,8 +318,7 @@ class Supervisor:
         fd = sys.stdin.fileno()
         old = termios.tcgetattr(fd)
         tty.setraw(fd)  # raw mode (no echo, no line buffering)
-        run = True
-        while run:
+        while self.run:
             try:
                 if len(self.current_data["messages"]) == 0:
                     self.handle_empy_buffer()
@@ -285,16 +326,20 @@ class Supervisor:
 
                 self.current_buffer.print_normal(f"{self.current_buffer.user_name}:")
                 self.current_buffer.print_user("", end="")
-                input_ = self.get_input().replace("\\n", "\n\r")
+                input_ = self.input.replace("\\n", "\n\r")
 
                 if len(input_) == 0:
                     self.current_buffer.reprint()
                     continue
                 if input_[0] == "/":
-                    run = self.process_command(input_)
+                    self.run = self.process_command(input_)
                 else:
                     self.add_massage(input_, "user")
+                    with self.input_cond:
+                        self.input_open = False
                     self.requester.get_reply(self.current_buffer)
+                    with self.input_cond:
+                        self.input_open = True
             except (KeyboardInterrupt, UnicodeDecodeError) as e:
                 if isinstance(e, UnicodeDecodeError):
                     self.current_buffer.print_normal("input too large")
