@@ -2,6 +2,9 @@ import socket
 import json
 import os
 import re
+import sys
+import tty
+import termios
 
 
 class ColorCodeExeption(Exception):
@@ -48,21 +51,21 @@ class Buffer:
     def set_user_color(self, value: str) -> None:
         self.user_color = self._process_color(value)
 
-    def print_normal(self, string: str, end="\n"):
+    def print_normal(self, string: str, end="\n\r"):
         print(
             f"{self.normal_color}{string}",
             end=end,
             flush=True,
         )
 
-    def print_ai(self, string: str, end="\n"):
+    def print_ai(self, string: str, end="\n\r"):
         print(
             f"{self.ai_color}{string}",
             end=end,
             flush=True,
         )
 
-    def print_user(self, string: str, end="\n"):
+    def print_user(self, string: str, end="\n\r"):
         print(
             f"{self.user_color}{string}",
             end=end,
@@ -141,6 +144,7 @@ class Requester:
                 body[1] = final.decode()
                 done = json.loads(body[1])["done"]
                 msg = json.loads(body[1])["message"]["content"]
+                msg = msg.replace("\n", "\r\n")
                 chat.chat_data["messages"][-1]["content"] += msg
                 chat.print_ai(msg, end="")
                 while not done:
@@ -151,6 +155,7 @@ class Requester:
                     body[1] = final.decode()
                     done = json.loads(body[1])["done"]
                     msg = json.loads(body[1])["message"]["content"]
+                    msg = msg.replace("\n", "\r\n")
                     chat.chat_data["messages"][-1]["content"] += msg
                     chat.print_ai(msg, end="")
             if "Content-Type: application/json;" in raw[0]:
@@ -160,11 +165,12 @@ class Requester:
                 final = raw[1].encode()
                 final += s.recv(min(self.max_recv, size - len(final)))
                 msg = json.loads(final.decode())["message"]["content"]
+                msg = msg.replace("\n", "\n\r")
                 chat.chat_data["messages"][-1]["content"] += msg
                 chat.print_ai(msg, end="")
         except KeyboardInterrupt:
             pass
-        print("")
+        print("", end="\n\r")
         s.close()
 
 
@@ -225,6 +231,7 @@ class Supervisor:
                 self.buffers.pop(self.current_buffer_id)
                 if len(self.buffers) == 0:
                     self.buffers.append(Buffer())
+                    self.current_buffer.reprint()
                 if self.current_buffer_id == len(self.buffers):
                     self.current_buffer_id -= 1
                     self.buffers[self.current_buffer_id].reprint()
@@ -234,29 +241,51 @@ class Supervisor:
                 self.current_buffer.print_normal(f"Unknown command: {command[0]}")
         return True
 
+    def get_input(self):
+        new_input = []
+        while True:
+            ch = sys.stdin.read(1)
+            if not ch or ch == "\r" or ch == "\n":
+                print("", end="\n\r")
+                return "".join(new_input)
+            if ord(ch) == 127:
+                print("\b", end="", flush=True)
+                new_input.pop(-1)
+                continue
+            new_input.append(ch)
+            print(ch, end="", flush=True)
+        print("", end="\n\r")
+        return "".join(new_input)
+
+    def handle_empy_buffer(self):
+        self.current_buffer.print_normal("system message")
+        input_ = self.get_input().replace("\\n", "\n\r")
+        if input_[0:2] == "/o":
+            if os.path.isfile(input_[2::]):
+                with open(input_[2::], encoding="utf-8") as file:
+                    string = file.read()
+                    self.add_massage(string, "system")
+            else:
+                self.current_buffer.print_normal("no such file")
+        else:
+            self.add_massage(input_, "system")
+            self.current_buffer.reprint()
+
     def run_chat(self) -> None:
         clean_screan()
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        tty.setraw(fd)  # raw mode (no echo, no line buffering)
         run = True
         while run:
             try:
                 if len(self.current_data["messages"]) == 0:
-                    self.current_buffer.print_normal("system message")
-                    input_ = input().replace("\\n", "\n")
-                    if input_[0:2] == "/o":
-                        if os.path.isfile(input_[2::]):
-                            with open(input_[2::], encoding="utf-8") as file:
-                                string = file.read()
-                                self.add_massage(string, "system")
-                        else:
-                            self.current_buffer.print_normal("no such file")
-                    else:
-                        self.add_massage(input_, "system")
-                        self.current_buffer.reprint()
+                    self.handle_empy_buffer()
                     continue
 
                 self.current_buffer.print_normal(f"{self.current_buffer.user_name}:")
                 self.current_buffer.print_user("", end="")
-                input_ = input().replace("\\n", "\n")
+                input_ = self.get_input().replace("\\n", "\n\r")
 
                 if len(input_) == 0:
                     self.current_buffer.reprint()
@@ -270,8 +299,8 @@ class Supervisor:
                 if isinstance(e, UnicodeDecodeError):
                     self.current_buffer.print_normal("input too large")
                 continue
-
         clean_screan()
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
 
 if __name__ == "__main__":
