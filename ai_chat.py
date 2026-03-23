@@ -8,8 +8,6 @@ import termios
 import threading
 import select
 
-canceled = False
-
 
 class ColorCodeExeption(Exception):
     pass
@@ -140,11 +138,23 @@ class Requester:
         chat.chat_data["messages"].append({"role": "assistant", "content": ""})
         reply = s.recv(self.max_recv)
         raw = reply.decode().split("\r\n\r\n")
-        try:
-            if "HTTP/1.1 200 OK" not in raw[0]:
-                return
-            if "Content-Type: application/x-ndjson" in raw[0]:
-                body = raw[1].split("\n")
+        if "HTTP/1.1 200 OK" not in raw[0]:
+            for raw_ in raw:
+                print(raw_, end="\r\n")
+            return
+        if "Content-Type: application/x-ndjson" in raw[0]:
+            body = raw[1].split("\n")
+            size = int(body[0], 16)
+            final = body[1].encode()
+            final = self._get_all(final, size + 2, s)
+            body[1] = final.decode()
+            done = json.loads(body[1])["done"]
+            msg = json.loads(body[1])["message"]["content"]
+            msg = msg.replace("\n", "\r\n")
+            chat.chat_data["messages"][-1]["content"] += msg
+            chat.print_ai(msg, end="")
+            while not done and not chat.cancel:
+                body = s.recv(self.max_recv).decode().split("\n")
                 size = int(body[0], 16)
                 final = body[1].encode()
                 final = self._get_all(final, size + 2, s)
@@ -154,29 +164,16 @@ class Requester:
                 msg = msg.replace("\n", "\r\n")
                 chat.chat_data["messages"][-1]["content"] += msg
                 chat.print_ai(msg, end="")
-                while not done and not chat.cancel:
-                    body = s.recv(self.max_recv).decode().split("\n")
-                    size = int(body[0], 16)
-                    final = body[1].encode()
-                    final = self._get_all(final, size + 2, s)
-                    body[1] = final.decode()
-                    done = json.loads(body[1])["done"]
-                    msg = json.loads(body[1])["message"]["content"]
-                    msg = msg.replace("\n", "\r\n")
-                    chat.chat_data["messages"][-1]["content"] += msg
-                    chat.print_ai(msg, end="")
-            if "Content-Type: application/json;" in raw[0]:
-                length = raw[0][raw[0].find("Content-Length: ") :]
-                length = length[: max(len(length), length.find("\n"))]
-                size = int(length[15::])
-                final = raw[1].encode()
-                final += s.recv(min(self.max_recv, size - len(final)))
-                msg = json.loads(final.decode())["message"]["content"]
-                msg = msg.replace("\n", "\n\r")
-                chat.chat_data["messages"][-1]["content"] += msg
-                chat.print_ai(msg, end="")
-        except KeyboardInterrupt:
-            pass
+        if "Content-Type: application/json;" in raw[0]:
+            length = raw[0][raw[0].find("Content-Length: ") :]
+            length = length[: max(len(length), length.find("\n"))]
+            size = int(length[15::])
+            final = raw[1].encode()
+            final += s.recv(min(self.max_recv, size - len(final)))
+            msg = json.loads(final.decode())["message"]["content"]
+            msg = msg.replace("\n", "\n\r")
+            chat.chat_data["messages"][-1]["content"] += msg
+            chat.print_ai(msg, end="")
         print("", end="\n\r")
         s.close()
 
@@ -273,7 +270,10 @@ class Supervisor:
                     self.current_buffer_id -= 1
                     self.buffers[self.current_buffer_id].reprint()
             case "/sm":
-                self.current_data["model"] = command[1]
+                if len(command) >= 2:
+                    self.current_data["model"] = command[1]
+                else:
+                    self.current_buffer.print_normal("no model given")
             case _:
                 self.current_buffer.print_normal(f"Unknown command: {command[0]}")
         return True
