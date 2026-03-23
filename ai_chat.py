@@ -186,7 +186,9 @@ class Supervisor:
         self.buffers = [Buffer()]
         self.current_buffer_id = 0
         self.requester = Requester()
+
         self.run = True
+        self.stop_pipe = os.pipe()
 
         self.input_ = []
         self.input_open = True
@@ -207,7 +209,7 @@ class Supervisor:
     @property
     def input(self):
         with self.input_cond:
-            while self.input_done == False:
+            while not self.input_done:
                 self.input_cond.wait()
             self.input_done = False
             self.input_open = True
@@ -215,8 +217,7 @@ class Supervisor:
             self.input_ = []
             return res
 
-    def handle_sigint(self, sigint, frame):
-        print("cancell")
+    def handle_sigint(self):
         self.current_buffer.cancel = True
 
     def add_massage(self, msg, type_) -> None:
@@ -225,6 +226,7 @@ class Supervisor:
     def process_command(self, command: str) -> bool:
         command = command.split(" ")
         if command[0] == "/q":
+            os.write(self.stop_pipe[1], b"\0")
             return False
         match command[0]:
             case "/d":
@@ -278,13 +280,18 @@ class Supervisor:
 
     def get_input(self):
         while self.run:
-            # TODO: ad pipe to remove the timeout
-            r, _, _ = select.select([sys.stdin], [], [], 0.5)
+            r, _, _ = select.select([sys.stdin, self.stop_pipe[0]], [], [])
+            if self.stop_pipe[0] in r:
+                return
             if sys.stdin in r:
                 ch = sys.stdin.read(1)
                 with self.input_cond:
+                    if ord(ch) == 91:
+                        while ch not in ["A", "B", "C", "D", "~"]:
+                            ch = sys.stdin.read(1)
+                        continue
                     if ord(ch) == 3:
-                        self.handle_sigint(0, 0)
+                        self.handle_sigint()
                     if not ch or ch == "\r" or ch == "\n":
                         print("", end="\n\r")
                         self.input_open = False
@@ -295,7 +302,7 @@ class Supervisor:
                             print("\b \b", end="", flush=True)
                             self.input_.pop(-1)
                         continue
-                    if self.input_open:
+                    if self.input_open and 32 <= ord(ch) <= 126:
                         self.input_.append(ch)
                         print(ch, end="", flush=True)
 
