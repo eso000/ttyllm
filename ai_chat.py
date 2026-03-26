@@ -32,6 +32,7 @@ class Buffer:
             "think": False,
             "messages": [],
         }
+        self.tokens = -1
 
     def _process_color(self, value: str) -> str:
         pattern_8bit = re.compile("^8b:[0-9]$")
@@ -95,6 +96,9 @@ class Buffer:
         for _id_, _msg_ in enumerate(self.chat_data["messages"]):
             self.print_normal(_id_)
             self.print_normal(_msg_)
+
+    def print_token(self):
+        self.print_normal(f"tokes: {self.tokens if self.tokens>-1 else '-'}")
 
 
 class Requester:
@@ -164,6 +168,11 @@ class Requester:
                 msg = msg.replace("\n", "\r\n")
                 chat.chat_data["messages"][-1]["content"] += msg
                 chat.print_ai(msg, end="")
+                if done:
+                    chat.tokens = (
+                        json.loads(final.decode())["prompt_eval_count"]
+                        + json.loads(final.decode())["eval_count"]
+                    )
         if "Content-Type: application/json;" in raw[0]:
             length = raw[0][raw[0].find("Content-Length: ") :]
             length = length[: max(len(length), length.find("\n"))]
@@ -174,6 +183,10 @@ class Requester:
             msg = msg.replace("\n", "\n\r")
             chat.chat_data["messages"][-1]["content"] += msg
             chat.print_ai(msg, end="")
+            chat.tokens = (
+                json.loads(final.decode())["prompt_eval_count"]
+                + json.loads(final.decode())["eval_count"]
+            )
         print("", end="\n\r")
         s.close()
 
@@ -226,11 +239,18 @@ class Supervisor:
             os.write(self.stop_pipe[1], b"\0")
             return False
         match command[0]:
+            case "/t":
+                self.current_buffer.print_token()
             case "/d":
                 self.current_buffer.print_data()
             case "/m":
                 self.current_buffer.print_messages()
             case "/p":
+                self.current_buffer.reprint()
+            case "/s":
+                self.buffers.append(Buffer())
+                self.buffers[-1].chat_data = json.loads(json.dumps(self.current_data))
+                self.current_buffer_id = len(self.buffers) - 1
                 self.current_buffer.reprint()
             case "/r":
                 if self.current_data["messages"][-1]["role"] == "assistant":
