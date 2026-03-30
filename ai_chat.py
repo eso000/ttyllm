@@ -344,7 +344,10 @@ class Supervisor:
         clean_screan()
         fd = sys.stdin.fileno()
         old = termios.tcgetattr(fd)
-        tty.setraw(fd)  # raw mode (no echo, no line buffering)
+        new = termios.tcgetattr(fd)
+        new[3] &= ~(termios.ICANON | termios.ECHO | termios.ISIG)
+        termios.tcsetattr(fd, termios.TCSADRAIN, new)
+
         while self.run:
             try:
                 if len(self.current_data["messages"]) == 0:
