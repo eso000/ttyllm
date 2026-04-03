@@ -86,6 +86,14 @@ class Buffer:
         self.tokens = -1
         self.cond = threading.Condition()
         self.in_request = False
+        self.add_msg("user")  # TODO: make proper system message handling
+
+    def del_msg(self, number=1):
+        with self.cond:
+            for _ in range(number):
+                self.chat_data["messages"].pop()
+            self.updated = True
+            self.cond.notify()
 
     def add_msg(self, role):
         with self.cond:
@@ -323,36 +331,30 @@ class Supervisor:
         if command[0] == "/q":
             return False
         match command[0]:
-            case "/t":
+            case "/t":  # TODO
                 self.current_buffer.print_token()
-            case "/d":
+            case "/d":  # TODO
                 self.current_buffer.print_data()
-            case "/m":
+            case "/m":  # TODO
                 self.current_buffer.print_messages()
-            case "/p":
+            case "/p":  # TODO
                 self.current_buffer.reprint()
             case "/s":
-                self.buffers.append(Buffer())
-                self.buffers[-1].chat_data = json.loads(json.dumps(self.current_data))
-                self.current_buffer_id = len(self.buffers) - 1
-                self.current_buffer.reprint()
+                new = Buffer()
+                new.chat_data = json.loads(json.dumps(self.current_data))
+                self.buffers.append(new)
+                self.change_buffer(len(self.buffers) - 1)
             case "/r":
-                if self.current_data["messages"][-1]["role"] == "assistant":
-                    self.current_data["messages"].pop()
-                    self.current_buffer.reprint()
-                    self.requester.get_reply(self.current_buffer)
+                self.current_buffer.del_msg(2)
+                self.requester.get_reply(self.current_buffer)
             case "/R":
                 self.current_data["messages"] = []
                 self.current_buffer.reprint()
             case "/rr":
-                if self.current_data["messages"][-1]["role"] == "assistant":
-                    self.current_data["messages"].pop()
-                    self.current_data["messages"].pop()
-                    self.current_buffer.reprint()
+                self.current_buffer.del_msg(3)
+                self.current_buffer.add_msg("user")
             case "/bc":
-                new = Buffer()
-                new.add_msg("user")
-                self.buffers.append(new)
+                self.buffers.append(Buffer())
                 self.change_buffer(len(self.buffers) - 1)
             case "/bn":
                 if self.current_buffer_id < len(self.buffers) - 1:
@@ -361,13 +363,18 @@ class Supervisor:
                 if self.current_buffer_id > 0:
                     self.change_buffer(self.current_buffer_id - 1)
             case "/bd":
+                cond = self.current_buffer.cond
                 self.buffers.pop(self.current_buffer_id)
                 if len(self.buffers) == 0:
                     self.buffers.append(Buffer())
-                    self.current_buffer.reprint()
                 if self.current_buffer_id == len(self.buffers):
                     self.current_buffer_id -= 1
-                    self.buffers[self.current_buffer_id].reprint()
+                with self.current_buffer.cond:
+                    self.current_buffer.updated = True
+                    self.current_buffer.cond.notify()
+                    with cond:
+                        cond.notify()
+
             case "/sm":
                 if len(command) >= 2:
                     self.current_data["model"] = command[1]
@@ -424,6 +431,7 @@ class Supervisor:
                     self.handle_sigint()
                 if not ch or ch == "\r" or ch == "\n":
                     if is_command:
+                        fit_text_to_box("", 19, 1, 90, 11, "\033[32m")
                         if not self.process_command():
                             self.run = False
                             self.handle_sigint()
@@ -431,7 +439,6 @@ class Supervisor:
                                 self.current_buffer.cond.notify()
                             self.input_cond.notify()
                         is_command = False
-                        fit_text_to_box(self.command, 19, 1, 90, 11, "\033[32m")
                     else:
                         self.input_done = True
                         self.input_cond.notify()
@@ -507,8 +514,6 @@ class Supervisor:
         new = termios.tcgetattr(fd)
         new[3] &= ~(termios.ICANON | termios.ECHO | termios.ISIG)
         termios.tcsetattr(fd, termios.TCSADRAIN, new)
-
-        self.current_buffer.add_msg("user")
 
         threads = [
             threading.Thread(target=self.get_input),
