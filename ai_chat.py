@@ -392,7 +392,10 @@ class Supervisor:
                 self.input_done = False
             if not self.run:
                 return
-            self.requester.get_reply(self.current_buffer)
+            if len(self.command) > 0:
+                self.process_command()
+            else:
+                self.requester.get_reply(self.current_buffer)
 
     def handle_escape_sequence(self):
         buffer = ""
@@ -432,13 +435,14 @@ class Supervisor:
                 if not ch or ch == "\r" or ch == "\n":
                     if is_command:
                         fit_text_to_box("", 19, 1, 90, 11, "\033[32m")
-                        if not self.process_command():
+                        if self.command == "/q":
                             self.run = False
                             self.handle_sigint()
                             with self.current_buffer.cond:
                                 self.current_buffer.cond.notify()
-                            self.input_cond.notify()
                         is_command = False
+                        self.input_done = True
+                        self.input_cond.notify()
                     else:
                         self.input_done = True
                         self.input_cond.notify()
