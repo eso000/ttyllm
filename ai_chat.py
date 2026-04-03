@@ -1,20 +1,67 @@
 import socket
 import json
-import os
 import re
 import sys
-import tty
 import termios
 import threading
-import select
+import dataclasses
 
 
 class ColorCodeExeption(Exception):
     pass
 
 
+@dataclasses.dataclass
+class TextBox:
+    lines = []
+    last = -1
+
+
 def clean_screan() -> None:
     print("\033[H\033[J\033[3J", end="", flush=True)
+
+
+def make_text_box(text, width, color=""):
+    res = TextBox()
+    res_lines = text.split("\n")
+    for part in res_lines:
+        res.lines += [
+            f"{color}{part[i : i + width]}" for i in range(0, len(part), width)
+        ]
+    return res
+
+
+def fit_to_box(box, width, height, start_x=1, start_y=1):
+    # clean box
+    print(f"\033[{start_x};{start_y}H", end="")
+    for x in range(height):
+        print(f"\033[{start_x+x};{start_y}H", end="")
+        print(width * " ", end="")
+
+    lines, last = (box.lines, box.last)
+
+    start = 0
+    if last < 0:
+        last = len(lines)
+    if len(lines) <= height:
+        last = len(lines)
+    last = max(last, height)
+    if last >= height:
+        start = max(0, last - height)
+    print(f"\033[H{start=} {last=}{len(lines)=}")
+    print(f"\033[{start_x};{start_y}H", end="", flush=True)
+    for x, line in enumerate(lines[start:last]):
+        print(f"\033[{start_x+x};{start_y}H", end="")
+        print(
+            line,
+            end="",
+        )
+    print("", end="", flush=True)
+    return len(lines)
+
+
+def fit_text_to_box(text, width, height, start_x=1, start_y=1, color=""):
+    fit_to_box(make_text_box(text, width, color), width, height, start_x, start_y)
 
 
 class Buffer:
@@ -25,6 +72,7 @@ class Buffer:
         self.user_color = "\033[36m"
         self.normal_color = "\033[37m"
         self.cancel = False
+        self.updated = False
 
         self.chat_data = {
             "model": "mistral-nemo",
@@ -33,6 +81,42 @@ class Buffer:
             "messages": [],
         }
         self.tokens = -1
+        self.cond = threading.Condition()
+        self.in_request = False
+
+    def add_msg(self, role):
+        with self.cond:
+            self.chat_data["messages"].append({"role": role, "content": ""})
+            self.updated = True
+            self.cond.notify()
+
+    def add_user(self, ch):
+        with self.cond:
+            if self.in_request:
+                return
+            if self.chat_data["messages"][-1].get("role") in ("user", "system"):
+                self.chat_data["messages"][-1]["content"] += ch
+                self.updated = True
+                self.cond.notify()
+
+    def del_user(self):
+        with self.cond:
+            if self.in_request:
+                return
+            if self.chat_data["messages"][-1].get("role") in ("user", "system"):
+                self.chat_data["messages"][-1]["content"] = self.chat_data["messages"][
+                    -1
+                ]["content"][:-1]
+                self.updated = True
+                self.cond.notify()
+
+    def add_ai(self, ch):
+        with self.cond:
+            if self.in_request:
+                if self.chat_data["messages"][-1].get("role") == "assistant":
+                    self.chat_data["messages"][-1]["content"] += ch
+                    self.updated = True
+                    self.cond.notify()
 
     def _process_color(self, value: str) -> str:
         pattern_8bit = re.compile("^8b:[0-9]$")
@@ -62,29 +146,32 @@ class Buffer:
             flush=True,
         )
 
-    def print_ai(self, string: str, end="\n\r"):
-        print(
-            f"{self.ai_color}{string}",
-            end=end,
-            flush=True,
-        )
+    def get_text_box(self, width, last=-1) -> str:
+        res = []
+        for msg_ in self.chat_data["messages"]:
+            color = self.user_color if msg_["role"] == "user" else self.ai_color
+            name = self.user_name if msg_["role"] == "user" else self.ai_name
+            res += [f"{self.normal_color}{name}"]
+            res_lines = msg_["content"].split("\n")
+            for line in res_lines:
+                res += [
+                    f"{color}{line[i : i + width]}" for i in range(0, len(line), width)
+                ]
+        result = TextBox()
+        result.last = last
+        result.lines = res
+        return result
 
-    def print_user(self, string: str, end="\n\r"):
-        print(
-            f"{self.user_color}{string}",
-            end=end,
-            flush=True,
-        )
-
-    def reprint(self) -> None:
-        clean_screan()
+    def get_string(self) -> str:
+        res = ""
         for msg_ in self.chat_data["messages"]:
             if msg_["role"] == "user":
-                self.print_normal(f"{self.user_name}:")
-                self.print_user(msg_["content"])
+                res += f"{self.normal_color}{self.user_name}\n"
+                res += f"{self.user_color}{msg_["content"]}\n"
             if msg_["role"] == "assistant":
-                self.print_normal(f"{self.ai_name}:")
-                self.print_ai(msg_["content"])
+                res += f"{self.normal_color}{self.ai_name}\n"
+                res += f"{self.ai_color}{msg_["content"]}\n"
+        return res
 
     def print_data(self) -> None:
         for key, value in self.chat_data.items():
@@ -132,14 +219,13 @@ class Requester:
 
     def get_reply(self, chat: Buffer) -> None:
         chat.cancel = False
+        chat.in_request = True
 
-        chat.print_normal(f"{chat.ai_name}:")
-        chat.print_ai("", end="")
+        chat.add_msg("assistant")
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.connect((self.host, self.port))
         s.send(self.make_post(chat.chat_data).encode())
 
-        chat.chat_data["messages"].append({"role": "assistant", "content": ""})
         reply = s.recv(self.max_recv)
         raw = reply.decode().split("\r\n\r\n")
         if "HTTP/1.1 200 OK" not in raw[0]:
@@ -155,8 +241,7 @@ class Requester:
             done = json.loads(body[1])["done"]
             msg = json.loads(body[1])["message"]["content"]
             msg = msg.replace("\n", "\r\n")
-            chat.chat_data["messages"][-1]["content"] += msg
-            chat.print_ai(msg, end="")
+            chat.add_ai(msg)
             while not done and not chat.cancel:
                 body = s.recv(self.max_recv).decode().split("\n")
                 size = int(body[0], 16)
@@ -166,8 +251,7 @@ class Requester:
                 done = json.loads(body[1])["done"]
                 msg = json.loads(body[1])["message"]["content"]
                 msg = msg.replace("\n", "\r\n")
-                chat.chat_data["messages"][-1]["content"] += msg
-                chat.print_ai(msg, end="")
+                chat.add_ai(msg)
                 if done:
                     chat.tokens = (
                         json.loads(final.decode())["prompt_eval_count"]
@@ -181,14 +265,14 @@ class Requester:
             final += s.recv(min(self.max_recv, size - len(final)))
             msg = json.loads(final.decode())["message"]["content"]
             msg = msg.replace("\n", "\n\r")
-            chat.chat_data["messages"][-1]["content"] += msg
-            chat.print_ai(msg, end="")
+            chat.add_ai(msg)
             chat.tokens = (
                 json.loads(final.decode())["prompt_eval_count"]
                 + json.loads(final.decode())["eval_count"]
             )
-        print("", end="\n\r")
         s.close()
+        chat.add_msg("user")
+        chat.in_request = False
 
 
 class Supervisor:
@@ -198,15 +282,12 @@ class Supervisor:
         self.requester = Requester()
 
         self.run = True
-        self.stop_pipe = os.pipe()
 
-        self.input_ = []
-        self.input_open = True
+        self.command = ""
         self.input_done = False
-        self.input_lock = threading.Lock()
         self.input_cond = threading.Condition()
-        self.input_thread = threading.Thread(target=self.get_input)
-        self.input_thread.start()
+        self.buffer_start = -1
+        self.buffer_lines = -1
 
     @property
     def current_buffer(self):
@@ -216,27 +297,12 @@ class Supervisor:
     def current_data(self):
         return self.current_buffer.chat_data
 
-    @property
-    def input(self):
-        with self.input_cond:
-            while not self.input_done:
-                self.input_cond.wait()
-            self.input_done = False
-            self.input_open = True
-            res = "".join(self.input_)
-            self.input_ = []
-            return res
-
     def handle_sigint(self):
         self.current_buffer.cancel = True
-
-    def add_massage(self, msg, type_) -> None:
-        self.current_data["messages"].append({"role": type_, "content": msg})
 
     def process_command(self, command: str) -> bool:
         command = command.split(" ")
         if command[0] == "/q":
-            os.write(self.stop_pipe[1], b"\0")
             return False
         match command[0]:
             case "/t":
@@ -256,11 +322,7 @@ class Supervisor:
                 if self.current_data["messages"][-1]["role"] == "assistant":
                     self.current_data["messages"].pop()
                     self.current_buffer.reprint()
-                    with self.input_cond:
-                        self.input_open = False
                     self.requester.get_reply(self.current_buffer)
-                    with self.input_cond:
-                        self.input_open = True
             case "/R":
                 self.current_data["messages"] = []
                 self.current_buffer.reprint()
@@ -298,82 +360,135 @@ class Supervisor:
                 self.current_buffer.print_normal(f"Unknown command: {command[0]}")
         return True
 
-    def get_input(self):
+    def watcher(self):
         while self.run:
-            r, _, _ = select.select([sys.stdin, self.stop_pipe[0]], [], [])
-            if self.stop_pipe[0] in r:
-                return
-            if sys.stdin in r:
-                ch = sys.stdin.read(1)
+            with self.input_cond:
+                while not self.input_done or self.run:
+                    self.input_cond.wait()
+                if not self.run:
+                    return
+                self.requester.get_reply(self.current_buffer)
                 with self.input_cond:
-                    if ord(ch) == 91:
-                        while ch not in ["A", "B", "C", "D", "~"]:
-                            ch = sys.stdin.read(1)
-                        continue
-                    if ord(ch) == 3:
-                        self.handle_sigint()
-                    if not ch or ch == "\r" or ch == "\n":
-                        print("", end="\n\r")
-                        self.input_open = False
-                        self.input_done = True
-                        self.input_cond.notify()
-                    if ord(ch) == 127:
-                        if len(self.input_) > 0:
-                            print("\b \b", end="", flush=True)
-                            self.input_.pop(-1)
-                        continue
-                    if self.input_open and 32 <= ord(ch) <= 126:
-                        self.input_.append(ch)
-                        print(ch, end="", flush=True)
+                    self.input_done = False
 
-    def handle_empy_buffer(self):
-        self.current_buffer.print_normal("system message")
-        input_ = self.input.replace("\\n", "\n\r")
-        if input_[0:2] == "/o":
-            if os.path.isfile(input_[2::]):
-                with open(input_[2::], encoding="utf-8") as file:
-                    string = file.read()
-                    self.add_massage(string, "system")
-            else:
-                self.current_buffer.print_normal("no such file")
-        else:
-            self.add_massage(input_, "system")
-            self.current_buffer.reprint()
+    def get_input(self):
+        input_length = 0
+        is_command = False
+        while self.run:
+            ch = sys.stdin.read(1)
+            with self.input_cond:
+                if ord(ch) == 91:
+                    buffer = ch
+                    while ch not in ["A", "B", "C", "D", "~"]:
+                        ch = sys.stdin.read(1)
+                        buffer += ch
+                    if buffer == "[A":
+                        if self.buffer_start < 0:
+                            self.buffer_start = self.buffer_lines - 1
+                        else:
+                            if self.buffer_start:
+                                self.buffer_start -= 1
+                    if buffer == "[B":
+                        if 0 <= self.buffer_start < self.buffer_lines:
+                            self.buffer_start += 1
+                        else:
+                            self.buffer_start = -1
+                    if buffer == "[D":
+                        self.buffer_start = -1
+                    with self.current_buffer.cond:
+                        self.current_buffer.updated = True
+                        self.current_buffer.cond.notify()
+
+                    continue
+                if ord(ch) == 3:
+                    self.handle_sigint()
+                if not ch or ch == "\r" or ch == "\n":
+                    if self.command == "/q":
+                        self.run = False
+                        with self.current_buffer.cond:
+                            self.current_buffer.cond.notify()
+                    self.input_done = True
+                    self.input_cond.notify()
+                    input_length = 0
+                if ord(ch) == 127:
+                    if input_length <= 0:
+                        continue
+                    input_length -= 1
+                    if is_command:
+                        self.command = self.command[0:-1]
+                        if input_length == 0:
+                            is_command = False
+                        fit_text_to_box(self.command, 19, 1, 90, 11, "\033[32m")
+                    else:
+                        self.current_buffer.del_user()
+                    continue
+                if not self.current_buffer.in_request and 32 <= ord(ch) <= 126:
+                    if input_length == 0 and ch == "/":
+                        is_command = True
+                        self.command = "/"
+                        fit_text_to_box(self.command, 19, 1, 90, 11, "\033[32m")
+                    else:
+                        if is_command:
+                            self.command += ch
+                            fit_text_to_box(self.command, 19, 1, 90, 11, "\033[32m")
+                        else:
+                            self.current_buffer.add_user(ch)
+                    input_length += 1
+
+    #    def handle_empy_buffer(self):
+    #        self.current_buffer.print_normal("system message")
+    #        self.add_massage("", "system")
+    #        input_ = self.input.replace("\\n", "\n\r")
+    #        if input_[0:2] == "/o":
+    #            if os.path.isfile(input_[2::]):
+    #                with open(input_[2::], encoding="utf-8") as file:
+    #                    string = file.read()
+    #                    self.add_massage(string, "system")
+    #            else:
+    #                self.current_buffer.print_normal("no such file")
+    #        else:
+    #            self.add_massage(input_, "system")
+    #            self.current_buffer.reprint()
+
+    def update_buffer(self):
+        while self.run:
+            with self.current_buffer.cond:
+                while not self.current_buffer.updated and self.run:
+                    self.current_buffer.cond.wait()
+                if not self.run:
+                    return
+                self.buffer_lines = fit_to_box(
+                    self.current_buffer.get_text_box(60, self.buffer_start),
+                    60,
+                    30,
+                    2,
+                    10,
+                )
+                self.current_buffer.updated = False
 
     def run_chat(self) -> None:
         clean_screan()
+        self.run = True
         fd = sys.stdin.fileno()
         old = termios.tcgetattr(fd)
         new = termios.tcgetattr(fd)
         new[3] &= ~(termios.ICANON | termios.ECHO | termios.ISIG)
         termios.tcsetattr(fd, termios.TCSADRAIN, new)
 
-        while self.run:
-            try:
-                if len(self.current_data["messages"]) == 0:
-                    self.handle_empy_buffer()
-                    continue
+        self.current_buffer.add_msg("user")
 
-                self.current_buffer.print_normal(f"{self.current_buffer.user_name}:")
-                self.current_buffer.print_user("", end="")
-                input_ = self.input.replace("\\n", "\n\r")
+        threads = [
+            threading.Thread(target=self.get_input),
+            threading.Thread(target=self.update_buffer),
+            threading.Thread(target=self.watcher),
+        ]
 
-                if len(input_) == 0:
-                    self.current_buffer.reprint()
-                    continue
-                if input_[0] == "/":
-                    self.run = self.process_command(input_)
-                else:
-                    self.add_massage(input_, "user")
-                    with self.input_cond:
-                        self.input_open = False
-                    self.requester.get_reply(self.current_buffer)
-                    with self.input_cond:
-                        self.input_open = True
-            except (KeyboardInterrupt, UnicodeDecodeError) as e:
-                if isinstance(e, UnicodeDecodeError):
-                    self.current_buffer.print_normal("input too large")
-                continue
+        for thread in threads:
+            thread.start()
+
+        for thread in threads:
+            thread.join()
+
         clean_screan()
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
