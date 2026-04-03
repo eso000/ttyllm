@@ -21,8 +21,11 @@ def clean_screan() -> None:
     print("\033[H\033[J\033[3J", end="", flush=True)
 
 
-def make_text_box(text, width, color=""):
+def make_text_box(text, width, color="") -> TextBox:
     res = TextBox()
+    if text == "":
+        res.lines = [""]
+        return res
     res_lines = text.split("\n")
     for part in res_lines:
         res.lines += [
@@ -151,12 +154,16 @@ class Buffer:
         for msg_ in self.chat_data["messages"]:
             color = self.user_color if msg_["role"] == "user" else self.ai_color
             name = self.user_name if msg_["role"] == "user" else self.ai_name
-            res += [f"{self.normal_color}{name}"]
-            res_lines = msg_["content"].split("\n")
-            for line in res_lines:
-                res += [
-                    f"{color}{line[i : i + width]}" for i in range(0, len(line), width)
-                ]
+            res += [f"{self.normal_color}{name}:"]
+            if msg_["content"] == "":
+                res += [""]
+            else:
+                res_lines = msg_["content"].split("\n")
+                for line in res_lines:
+                    res += [
+                        f"{color}{line[i : i + width]}"
+                        for i in range(0, len(line), width)
+                    ]
         result = TextBox()
         result.last = last
         result.lines = res
@@ -288,6 +295,7 @@ class Supervisor:
         self.input_cond = threading.Condition()
         self.buffer_start = -1
         self.buffer_lines = -1
+        self.buffer_changed = False
 
     @property
     def current_buffer(self):
@@ -300,8 +308,18 @@ class Supervisor:
     def handle_sigint(self):
         self.current_buffer.cancel = True
 
-    def process_command(self, command: str) -> bool:
-        command = command.split(" ")
+    def change_buffer(self, new_id):
+        old_buffer = self.current_buffer
+        self.current_buffer_id = new_id
+        with self.current_buffer.cond:
+            self.current_buffer.updated = True
+            with old_buffer.cond:
+                old_buffer.cond.notify()
+            self.current_buffer.cond.notify()
+
+    def process_command(self) -> bool:
+        command = self.command.split(" ")
+        self.command = ""
         if command[0] == "/q":
             return False
         match command[0]:
@@ -332,17 +350,16 @@ class Supervisor:
                     self.current_data["messages"].pop()
                     self.current_buffer.reprint()
             case "/bc":
-                self.buffers.append(Buffer())
-                self.current_buffer_id = len(self.buffers) - 1
-                self.current_buffer.reprint()
+                new = Buffer()
+                new.add_msg("user")
+                self.buffers.append(new)
+                self.change_buffer(len(self.buffers) - 1)
             case "/bn":
                 if self.current_buffer_id < len(self.buffers) - 1:
-                    self.current_buffer_id += 1
-                self.current_buffer.reprint()
+                    self.change_buffer(self.current_buffer_id + 1)
             case "/bp":
                 if self.current_buffer_id > 0:
-                    self.current_buffer_id -= 1
-                self.current_buffer.reprint()
+                    self.change_buffer(self.current_buffer_id - 1)
             case "/bd":
                 self.buffers.pop(self.current_buffer_id)
                 if len(self.buffers) == 0:
@@ -363,13 +380,36 @@ class Supervisor:
     def watcher(self):
         while self.run:
             with self.input_cond:
-                while not self.input_done or self.run:
+                while not self.input_done and self.run:
                     self.input_cond.wait()
-                if not self.run:
-                    return
-                self.requester.get_reply(self.current_buffer)
-                with self.input_cond:
-                    self.input_done = False
+                self.input_done = False
+            if not self.run:
+                return
+            self.requester.get_reply(self.current_buffer)
+
+    def handle_escape_sequence(self):
+        buffer = ""
+        ch = 27
+        while ch not in ["A", "B", "C", "D", "~"]:
+            ch = sys.stdin.read(1)
+            buffer += ch
+        fit_text_to_box(buffer, 9, 1, 1, 30)
+        if buffer == "[A" or buffer.startswith("OA"):
+            if self.buffer_start < 0:
+                self.buffer_start = self.buffer_lines - 1
+            else:
+                if self.buffer_start:
+                    self.buffer_start -= 1
+        if buffer == "[B" or buffer.startswith("OB"):
+            if 0 <= self.buffer_start < self.buffer_lines:
+                self.buffer_start += 1
+            else:
+                self.buffer_start = -1
+        if buffer == "[D":
+            self.buffer_start = -1
+        with self.current_buffer.cond:
+            self.current_buffer.updated = True
+            self.current_buffer.cond.notify()
 
     def get_input(self):
         input_length = 0
@@ -377,38 +417,24 @@ class Supervisor:
         while self.run:
             ch = sys.stdin.read(1)
             with self.input_cond:
-                if ord(ch) == 91:
-                    buffer = ch
-                    while ch not in ["A", "B", "C", "D", "~"]:
-                        ch = sys.stdin.read(1)
-                        buffer += ch
-                    if buffer == "[A":
-                        if self.buffer_start < 0:
-                            self.buffer_start = self.buffer_lines - 1
-                        else:
-                            if self.buffer_start:
-                                self.buffer_start -= 1
-                    if buffer == "[B":
-                        if 0 <= self.buffer_start < self.buffer_lines:
-                            self.buffer_start += 1
-                        else:
-                            self.buffer_start = -1
-                    if buffer == "[D":
-                        self.buffer_start = -1
-                    with self.current_buffer.cond:
-                        self.current_buffer.updated = True
-                        self.current_buffer.cond.notify()
-
+                if ord(ch) == 27:
+                    self.handle_escape_sequence()
                     continue
                 if ord(ch) == 3:
                     self.handle_sigint()
                 if not ch or ch == "\r" or ch == "\n":
-                    if self.command == "/q":
-                        self.run = False
-                        with self.current_buffer.cond:
-                            self.current_buffer.cond.notify()
-                    self.input_done = True
-                    self.input_cond.notify()
+                    if is_command:
+                        if not self.process_command():
+                            self.run = False
+                            self.handle_sigint()
+                            with self.current_buffer.cond:
+                                self.current_buffer.cond.notify()
+                            self.input_cond.notify()
+                        is_command = False
+                        fit_text_to_box(self.command, 19, 1, 90, 11, "\033[32m")
+                    else:
+                        self.input_done = True
+                        self.input_cond.notify()
                     input_length = 0
                 if ord(ch) == 127:
                     if input_length <= 0:
@@ -422,17 +448,16 @@ class Supervisor:
                     else:
                         self.current_buffer.del_user()
                     continue
-                if not self.current_buffer.in_request and 32 <= ord(ch) <= 126:
+                if 32 <= ord(ch) <= 126:
                     if input_length == 0 and ch == "/":
                         is_command = True
                         self.command = "/"
                         fit_text_to_box(self.command, 19, 1, 90, 11, "\033[32m")
+                    elif not self.current_buffer.in_request and not is_command:
+                        self.current_buffer.add_user(ch)
                     else:
-                        if is_command:
-                            self.command += ch
-                            fit_text_to_box(self.command, 19, 1, 90, 11, "\033[32m")
-                        else:
-                            self.current_buffer.add_user(ch)
+                        self.command += ch
+                        fit_text_to_box(self.command, 19, 1, 90, 11, "\033[32m")
                     input_length += 1
 
     #    def handle_empy_buffer(self):
@@ -453,8 +478,15 @@ class Supervisor:
     def update_buffer(self):
         while self.run:
             with self.current_buffer.cond:
-                while not self.current_buffer.updated and self.run:
+                while (
+                    not self.current_buffer.updated
+                    and self.run
+                    and not self.buffer_changed
+                ):
                     self.current_buffer.cond.wait()
+                if self.buffer_changed:
+                    self.buffer_changed = False
+                    continue
                 if not self.run:
                     return
                 self.buffer_lines = fit_to_box(
@@ -467,6 +499,7 @@ class Supervisor:
                 self.current_buffer.updated = False
 
     def run_chat(self) -> None:
+        print("\033[?1049h", end="", flush=True)
         clean_screan()
         self.run = True
         fd = sys.stdin.fileno()
@@ -490,6 +523,7 @@ class Supervisor:
             thread.join()
 
         clean_screan()
+        print("\033[?1049l", end="", flush=True)
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
 
