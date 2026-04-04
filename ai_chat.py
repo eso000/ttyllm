@@ -53,7 +53,6 @@ def fit_to_box(box, width, height, start_x=1, start_y=1):
     last = max(last, height)
     if last >= height:
         start = max(0, last - height)
-    print(f"\033[H{start=} {last=}{len(lines)=}")
     print(f"\033[{start_x};{start_y}H", end="", flush=True)
     for x, line in enumerate(lines[start:last]):
         print(f"\033[{start_x+x};{start_y}H", end="")
@@ -88,7 +87,14 @@ class Buffer:
         self.tokens = -1
         self.cond = threading.Condition()
         self.in_request = False
-        self.add_msg("user")  # TODO: make proper system message handling
+        self.add_msg("system")
+
+    def empty(self, number=1):
+        with self.cond:
+            self.chat_data["messages"] = []
+            self.add_msg("system")
+            self.updated = True
+            self.cond.notify()
 
     def del_msg(self, number=1):
         with self.cond:
@@ -160,8 +166,27 @@ class Buffer:
         )
 
     def get_text_box(self, width, last=-1) -> str:
+        result = TextBox()
         res = []
+        if len(self.chat_data["messages"]) == 1:
+            res += [f"{self.normal_color}system:"]
+            msg_ = self.chat_data["messages"][0]
+            if msg_["content"] == "":
+                res += [""]
+            else:
+                res_lines = msg_["content"].split("\n")
+                for line in res_lines:
+                    res += [
+                        f"{self.normal_color}{line[i : i + width]}"
+                        for i in range(0, len(line), width)
+                    ]
+            result.last = last
+            result.lines = res
+            return result
+
         for msg_ in self.chat_data["messages"]:
+            if msg_["role"] == "system":
+                continue
             color = self.user_color if msg_["role"] == "user" else self.ai_color
             name = self.user_name if msg_["role"] == "user" else self.ai_name
             res += [f"{self.normal_color}{name}:"]
@@ -174,7 +199,6 @@ class Buffer:
                         f"{color}{line[i : i + width]}"
                         for i in range(0, len(line), width)
                     ]
-        result = TextBox()
         result.last = last
         result.lines = res
         return result
@@ -327,6 +351,7 @@ class Supervisor:
         size = shutil.get_terminal_size()
         self.columns = size.columns
         self.lines = size.lines
+        clean_screan()
         with self.current_buffer.cond:
             self.current_buffer.updated = True
             self.current_buffer.cond.notify()
@@ -364,8 +389,7 @@ class Supervisor:
                 self.current_buffer.del_msg(2)
                 self.requester.get_reply(self.current_buffer)
             case "/R":
-                self.current_data["messages"] = []
-                self.current_buffer.reprint()
+                self.current_buffer.empty()
             case "/rr":
                 self.current_buffer.del_msg(3)
                 self.current_buffer.add_msg("user")
@@ -400,6 +424,15 @@ class Supervisor:
                 self.current_buffer.print_normal(f"Unknown command: {command[0]}")
         return True
 
+    def handle_new_message(self):
+        if (
+            len(self.current_data["messages"]) == 1
+            and self.current_data["messages"][0]["role"] == "system"
+        ):
+            self.current_buffer.add_msg("user")
+        else:
+            self.requester.get_reply(self.current_buffer)
+
     def watcher(self):
         while self.run:
             with self.input_cond:
@@ -411,7 +444,7 @@ class Supervisor:
             if len(self.command) > 0:
                 self.process_command()
             else:
-                self.requester.get_reply(self.current_buffer)
+                self.handle_new_message()
 
     def handle_escape_sequence(self):
         buffer = ""
@@ -419,7 +452,6 @@ class Supervisor:
         while ch not in ["A", "B", "C", "D", "~"]:
             ch = sys.stdin.read(1)
             buffer += ch
-        fit_text_to_box(buffer, 9, 1, 1, 30)
         if buffer == "[A" or buffer.startswith("OA"):
             if self.buffer_start < 0:
                 self.buffer_start = self.buffer_lines - 1
@@ -498,21 +530,6 @@ class Supervisor:
                         self.update_command()
                     input_length += 1
 
-    #    def handle_empy_buffer(self):
-    #        self.current_buffer.print_normal("system message")
-    #        self.add_massage("", "system")
-    #        input_ = self.input.replace("\\n", "\n\r")
-    #        if input_[0:2] == "/o":
-    #            if os.path.isfile(input_[2::]):
-    #                with open(input_[2::], encoding="utf-8") as file:
-    #                    string = file.read()
-    #                    self.add_massage(string, "system")
-    #            else:
-    #                self.current_buffer.print_normal("no such file")
-    #        else:
-    #            self.add_massage(input_, "system")
-    #            self.current_buffer.reprint()
-
     def update_buffer(self):
         while self.run:
             with self.current_buffer.cond:
@@ -527,6 +544,8 @@ class Supervisor:
                     continue
                 if not self.run:
                     return
+                if len(self.current_data["messages"]) == 0:
+                    self.current_buffer.add_msg("system")
                 self.buffer_lines = fit_to_box(
                     self.current_buffer.get_text_box(
                         self.columns - 4, self.buffer_start
