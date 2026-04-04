@@ -36,11 +36,11 @@ def make_text_box(text, width, color="") -> TextBox:
     return res
 
 
-def fit_to_box(box, width, height, start_x=1, start_y=1):
+def fit_to_box(box, width, height, start_x=1, start_y=1, background=""):
     # clean box
     print(f"\033[{start_x};{start_y}H", end="")
     for x in range(height):
-        print(f"\033[{start_x+x};{start_y}H", end="")
+        print(f"{background}\033[{start_x+x};{start_y}H", end="")
         print(width * " ", end="")
 
     lines, last = (box.lines, box.last)
@@ -60,12 +60,14 @@ def fit_to_box(box, width, height, start_x=1, start_y=1):
             line,
             end="",
         )
-    print("", end="", flush=True)
+    print("\033[0m", end="", flush=True)
     return len(lines)
 
 
-def fit_text_to_box(text, width, height, start_x=1, start_y=1, color=""):
-    fit_to_box(make_text_box(text, width, color), width, height, start_x, start_y)
+def fit_text_to_box(text, width, height, start_x=1, start_y=1, color="", background=""):
+    fit_to_box(
+        make_text_box(text, width, color), width, height, start_x, start_y, background
+    )
 
 
 class Buffer:
@@ -89,7 +91,7 @@ class Buffer:
         self.in_request = False
         self.add_msg("system")
 
-    def empty(self, number=1):
+    def empty(self):
         with self.cond:
             self.chat_data["messages"] = []
             self.add_msg("system")
@@ -352,6 +354,7 @@ class Supervisor:
         self.columns = size.columns
         self.lines = size.lines
         clean_screan()
+        self.update_command()
         with self.current_buffer.cond:
             self.current_buffer.updated = True
             self.current_buffer.cond.notify()
@@ -476,9 +479,8 @@ class Supervisor:
             )
         else:
             fit_text_to_box(
-                self.columns * " ", self.columns, 1, self.lines, 1, "\033[41m"
+                self.command, self.columns, 1, self.lines, 1, "\033[32m", "\033[41m"
             )
-            fit_text_to_box(self.command, self.columns, 1, self.lines, 1, "\033[32m")
 
     def get_input(self):
         input_length = 0
