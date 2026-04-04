@@ -5,6 +5,8 @@ import sys
 import termios
 import threading
 import dataclasses
+import signal
+import shutil
 
 
 class ColorCodeExeption(Exception):
@@ -78,7 +80,7 @@ class Buffer:
         self.updated = False
 
         self.chat_data = {
-            "model": "mistral-nemo",
+            "model": "gemma2:2b",  # "mistral-nemo",
             "stream": True,
             "think": False,
             "messages": [],
@@ -305,6 +307,11 @@ class Supervisor:
         self.buffer_lines = -1
         self.buffer_changed = False
 
+        size = shutil.get_terminal_size()
+        self.columns = size.columns
+        self.lines = size.lines
+        signal.signal(signal.SIGWINCH, self.handle_sigwinch)
+
     @property
     def current_buffer(self):
         return self.buffers[self.current_buffer_id]
@@ -315,6 +322,14 @@ class Supervisor:
 
     def handle_sigint(self):
         self.current_buffer.cancel = True
+
+    def handle_sigwinch(self, signum, frame):
+        size = shutil.get_terminal_size()
+        self.columns = size.columns
+        self.lines = size.lines
+        with self.current_buffer.cond:
+            self.current_buffer.updated = True
+            self.current_buffer.cond.notify()
 
     def change_buffer(self, new_id):
         old_buffer = self.current_buffer
@@ -328,6 +343,7 @@ class Supervisor:
     def process_command(self) -> bool:
         command = self.command.split(" ")
         self.command = ""
+        self.update_command()
         if command[0] == "/q":
             return False
         match command[0]:
@@ -421,6 +437,17 @@ class Supervisor:
             self.current_buffer.updated = True
             self.current_buffer.cond.notify()
 
+    def update_command(self):
+        if self.command == "":
+            fit_text_to_box(
+                self.columns * " ", self.columns, 1, self.lines, 1, "\033[0m"
+            )
+        else:
+            fit_text_to_box(
+                self.columns * " ", self.columns, 1, self.lines, 1, "\033[41m"
+            )
+            fit_text_to_box(self.command, self.columns, 1, self.lines, 1, "\033[32m")
+
     def get_input(self):
         input_length = 0
         is_command = False
@@ -434,13 +461,13 @@ class Supervisor:
                     self.handle_sigint()
                 if not ch or ch == "\r" or ch == "\n":
                     if is_command:
-                        fit_text_to_box("", 19, 1, 90, 11, "\033[32m")
                         if self.command == "/q":
                             self.run = False
                             self.handle_sigint()
                             with self.current_buffer.cond:
                                 self.current_buffer.cond.notify()
                         is_command = False
+                        self.update_command()
                         self.input_done = True
                         self.input_cond.notify()
                     else:
@@ -455,7 +482,7 @@ class Supervisor:
                         self.command = self.command[0:-1]
                         if input_length == 0:
                             is_command = False
-                        fit_text_to_box(self.command, 19, 1, 90, 11, "\033[32m")
+                        self.update_command()
                     else:
                         self.current_buffer.del_user()
                     continue
@@ -463,12 +490,12 @@ class Supervisor:
                     if input_length == 0 and ch == "/":
                         is_command = True
                         self.command = "/"
-                        fit_text_to_box(self.command, 19, 1, 90, 11, "\033[32m")
+                        self.update_command()
                     elif not self.current_buffer.in_request and not is_command:
                         self.current_buffer.add_user(ch)
                     else:
                         self.command += ch
-                        fit_text_to_box(self.command, 19, 1, 90, 11, "\033[32m")
+                        self.update_command()
                     input_length += 1
 
     #    def handle_empy_buffer(self):
@@ -501,11 +528,13 @@ class Supervisor:
                 if not self.run:
                     return
                 self.buffer_lines = fit_to_box(
-                    self.current_buffer.get_text_box(60, self.buffer_start),
-                    60,
-                    30,
+                    self.current_buffer.get_text_box(
+                        self.columns - 4, self.buffer_start
+                    ),
+                    self.columns - 4,
+                    self.lines - 5,
                     2,
-                    10,
+                    3,
                 )
                 self.current_buffer.updated = False
 
