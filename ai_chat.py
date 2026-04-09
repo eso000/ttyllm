@@ -131,6 +131,12 @@ class Buffer:
                 self.updated = True
                 self.cond.notify()
 
+    def clear_msg(self):
+        with self.cond:
+            self.chat_data["messages"][-1]["content"] = ""
+            self.updated = True
+            self.cond.notify()
+
     def add_ai(self, ch):
         with self.cond:
             if self.in_request:
@@ -490,6 +496,13 @@ class Supervisor:
         while self.run:
             ch = sys.stdin.read(1)
             with self.input_cond:
+                if ord(ch) == 21:
+                    if self.command:
+                        self.command = ""
+                        self.update_command()
+                        is_command = False
+                    else:
+                        self.current_buffer.clear_msg()
                 if ord(ch) == 27:
                     self.handle_escape_sequence()
                     continue
