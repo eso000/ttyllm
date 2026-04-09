@@ -15,7 +15,7 @@ class ColorCodeExeption(Exception):
 
 @dataclasses.dataclass
 class TextBox:
-    lines = []
+    lines: list = dataclasses.field(default_factory=list)
     last = -1
 
 
@@ -23,8 +23,9 @@ def clean_screan() -> None:
     print("\033[H\033[J\033[3J", end="", flush=True)
 
 
-def make_text_box(text, width, color="") -> TextBox:
+def make_text_box(text, width, last=-1, color="") -> TextBox:
     res = TextBox()
+    res.last = last
     if text == "":
         res.lines = [""]
         return res
@@ -66,7 +67,12 @@ def fit_to_box(box, width, height, start_x=1, start_y=1, background=""):
 
 def fit_text_to_box(text, width, height, start_x=1, start_y=1, color="", background=""):
     fit_to_box(
-        make_text_box(text, width, color), width, height, start_x, start_y, background
+        make_text_box(text, width, color=color),
+        width,
+        height,
+        start_x,
+        start_y,
+        background,
     )
 
 
@@ -79,7 +85,8 @@ class Buffer:
         self.normal_color = "\033[37m"
         self.cancel = False
         self.updated = False
-
+        self.show_data = False
+        self.show_system = False
         self.chat_data = {
             "model": "gemma2:2b",  # "mistral-nemo",
             "stream": True,
@@ -117,6 +124,8 @@ class Buffer:
                 return
             if self.chat_data["messages"][-1].get("role") in ("user", "system"):
                 self.chat_data["messages"][-1]["content"] += ch
+                self.show_data = False
+                self.show_system = False
                 self.updated = True
                 self.cond.notify()
 
@@ -174,6 +183,34 @@ class Buffer:
         )
 
     def get_text_box(self, width, last=-1) -> str:
+        if self.show_data:
+            return self._get_text_box_data(width, last)
+        if self.show_system:
+            return self._get_text_box_system(width, last)
+        return self._get_text_box_normal(width, last)
+
+    def _get_text_box_system(self, width, last=-1) -> str:
+        result = TextBox()
+        res = []
+        res += [f"{self.normal_color}system:"]
+        msg_ = self.chat_data["messages"][0]
+        if msg_["content"] == "":
+            res += [""]
+        else:
+            res_lines = msg_["content"].split("\n")
+            for line in res_lines:
+                res += [
+                    f"{self.normal_color}{line[i : i + width]}"
+                    for i in range(0, len(line), width)
+                ]
+        result.last = last
+        result.lines = res
+        return result
+
+    def _get_text_box_data(self, width, last=-1) -> str:
+        return make_text_box(json.dumps(self.chat_data, indent=4), width, last=last)
+
+    def _get_text_box_normal(self, width, last=-1) -> str:
         result = TextBox()
         res = []
         if len(self.chat_data["messages"]) == 1:
@@ -381,14 +418,24 @@ class Supervisor:
         if command[0] == "/q":
             return False
         match command[0]:
-            case "/t":  # TODO
-                self.current_buffer.print_token()
-            case "/d":  # TODO
-                self.current_buffer.print_data()
-            case "/m":  # TODO
-                self.current_buffer.print_messages()
-            case "/p":  # TODO
-                self.current_buffer.reprint()
+            case "/n":
+                with self.current_buffer.cond:
+                    self.current_buffer.show_data = False
+                    self.current_buffer.show_system = False
+                    self.current_buffer.updated = True
+                    self.current_buffer.cond.notify()
+            case "/d":
+                with self.current_buffer.cond:
+                    self.current_buffer.show_data = True
+                    self.current_buffer.show_system = False
+                    self.current_buffer.updated = True
+                    self.current_buffer.cond.notify()
+            case "/S":
+                with self.current_buffer.cond:
+                    self.current_buffer.show_system = True
+                    self.current_buffer.show_data = False
+                    self.current_buffer.updated = True
+                    self.current_buffer.cond.notify()
             case "/s":
                 new = Buffer()
                 new.chat_data = json.loads(json.dumps(self.current_data))
