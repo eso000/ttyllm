@@ -264,11 +264,11 @@ class Requester:
         chat.cancel = False
         chat.in_request = True
 
-        chat.add_msg("assistant")
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.connect((self.host, self.port))
         s.send(self.make_post(chat.chat_data).encode())
 
+        chat.add_msg("assistant")
         reply = s.recv(self.max_recv)
         raw = reply.decode().split("\r\n\r\n")
         if "HTTP/1.1 200 OK" not in raw[0]:
@@ -428,6 +428,8 @@ class Supervisor:
         return True
 
     def handle_new_message(self):
+        content = self.current_data["messages"][-1]["content"].replace("\\n", "\n")
+        self.current_data["messages"][-1]["content"] = content
         if (
             len(self.current_data["messages"]) == 1
             and self.current_data["messages"][0]["role"] == "system"
