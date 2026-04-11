@@ -374,7 +374,7 @@ class Supervisor:
         self.command = ""
         self.input_done = False
         self.input_cond = threading.Condition()
-        self.buffer_start = -1
+        self.buffer_last = -1
         self.buffer_lines = -1
         self.buffer_changed = False
 
@@ -423,7 +423,7 @@ class Supervisor:
         match command[0]:
             case "/h":
                 with self.current_buffer.cond:
-                    self.buffer_start = 0
+                    self.buffer_last = 0
                     self.state = State.HELP
                     self.current_buffer.updated = True
                     self.current_buffer.cond.notify()
@@ -434,7 +434,7 @@ class Supervisor:
                     self.current_buffer.cond.notify()
             case "/d":
                 with self.current_buffer.cond:
-                    self.buffer_start = 0
+                    self.buffer_last = 0
                     self.state = State.DATA
                     self.current_buffer.updated = True
                     self.current_buffer.cond.notify()
@@ -518,20 +518,20 @@ class Supervisor:
             ch = sys.stdin.read(1)
             buffer += ch
         if buffer == "[A" or buffer.startswith("OA"):
-            if self.buffer_start < 0:
-                self.buffer_start = self.buffer_lines - 1
+            if self.buffer_last < 0:
+                self.buffer_last = self.buffer_lines - 1
             else:
-                if self.buffer_start:
-                    self.buffer_start -= 1
+                if self.buffer_last:
+                    self.buffer_last -= 1
         if buffer == "[B" or buffer.startswith("OB"):
-            if 0 <= self.buffer_start < self.buffer_lines:
-                self.buffer_start += 1
+            if 0 <= self.buffer_last < self.buffer_lines:
+                self.buffer_last += 1
             else:
-                self.buffer_start = -1
+                self.buffer_last = -1
         if buffer == "[D":
-            self.buffer_start = -1
+            self.buffer_last = -1
         if buffer == "[C":
-            self.buffer_start = 1
+            self.buffer_last = 1
         with self.current_buffer.cond:
             self.current_buffer.updated = True
             self.current_buffer.cond.notify()
@@ -604,7 +604,7 @@ class Supervisor:
                                 self.current_buffer.updated = True
                                 self.current_buffer.cond.notify()
                     else:
-                        self.buffer_start = -1
+                        self.buffer_last = -1
                         self.state = State.NORMAL
                         self.current_buffer.del_user()
                     continue
@@ -614,7 +614,7 @@ class Supervisor:
                         self.command = "/"
                         self.update_command()
                     elif not self.current_buffer.in_request and not is_command:
-                        self.buffer_start = -1
+                        self.buffer_last = -1
                         self.state = State.NORMAL
                         self.current_buffer.add_user(ch)
                     else:
@@ -642,25 +642,25 @@ class Supervisor:
                 match self.state:
                     case State.NORMAL:
                         box = self.current_buffer.get_text_box(
-                            self.columns - 4, self.buffer_start
+                            self.columns - 4, self.buffer_last
                         )
                         hide_cursor = False
                     case State.SYSTEM:
                         box = self.current_buffer.get_text_box_system(
-                            self.columns - 4, self.buffer_start
+                            self.columns - 4, self.buffer_last
                         )
                         hide_cursor = True
                     case State.DATA:
                         box = self.current_buffer.get_text_box_data(
-                            self.columns - 4, self.buffer_start
+                            self.columns - 4, self.buffer_last
                         )
                         hide_cursor = True
                     case State.HELP:
                         box = make_text_box(
-                            "THERE IS NO HELP", self.columns - 4, self.buffer_start
+                            "THERE IS NO HELP", self.columns - 4, self.buffer_last
                         )
 
-                (self.buffer_lines, self.buffer_start) = fit_to_box(
+                (self.buffer_lines, self.buffer_last) = fit_to_box(
                     box, self.columns - 4, self.lines - 5, 2, 3, hide_cursor=hide_cursor
                 )
                 self.current_buffer.updated = False
