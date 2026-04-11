@@ -538,7 +538,9 @@ class Supervisor:
     def update_command(self):
         if self.command == "":
             fit_text_to_box(
-                f"    model: {self.current_data['model']} -- tokens: {self.current_buffer.tokens}",
+                f"    model: {self.current_data['model']}"
+                f" -- tokens: {self.current_buffer.tokens}"
+                f"   buffer: {self.current_buffer_id + 1} of {len(self.buffers)}",
                 self.columns,
                 1,
                 self.lines,
