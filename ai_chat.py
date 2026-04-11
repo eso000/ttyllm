@@ -41,11 +41,7 @@ def make_text_box(text, width, last=-1, color="") -> TextBox:
 def fit_to_box(
     box, width, height, start_x=1, start_y=1, background="", hide_cursor=False
 ):
-    # clean box
-    # print(f"\033[{start_x};{start_y}H", end="")
     # for x in range(height):
-    #    print(f"{background}\033[{start_x+x};{start_y}H", end="")
-    #    print(width * " ", end="")
 
     lines, last = (box.lines, box.last)
 
@@ -60,6 +56,11 @@ def fit_to_box(
     if last >= height:
         start = max(0, last - height)
     print(f"\033[{start_x};{start_y}H", end="", flush=True)
+
+    for x in range(max(0, height - len(lines))):
+        print(f"{background}\033[{start_x+x+ len(lines)};{start_y}H", end="")
+        print(width * " ", end="")
+
     for x, line in enumerate(lines[start:last]):
         print(f"\033[{start_x+x};{start_y}H", end="")
         print(f"{background}{width * ' '}", end="")
@@ -68,6 +69,7 @@ def fit_to_box(
             line,
             end="",
         )
+
     print("\033[0m", end="", flush=True)
 
     if box.last != -1 or hide_cursor:
