@@ -195,13 +195,6 @@ class Buffer:
     def set_user_color(self, value: str) -> None:
         self.user_color = self._process_color(value)
 
-    def print_normal(self, string: str, end="\n\r"):
-        print(
-            f"{self.normal_color}{string}",
-            end=end,
-            flush=True,
-        )
-
     def get_text_box_system(self, width, last=-1) -> str:
         result = TextBox()
         res = []
@@ -271,20 +264,6 @@ class Buffer:
                 res += f"{self.normal_color}{self.ai_name}\n"
                 res += f"{self.ai_color}{msg_["content"]}\n"
         return res
-
-    def print_data(self) -> None:
-        for key, value in self.chat_data.items():
-            if key != "messages":
-                self.print_normal(f"{key}: {value}")
-
-    def print_messages(self) -> None:
-        clean_screan()
-        for _id_, _msg_ in enumerate(self.chat_data["messages"]):
-            self.print_normal(_id_)
-            self.print_normal(_msg_)
-
-    def print_token(self):
-        self.print_normal(f"tokes: {self.tokens if self.tokens>-1 else '-'}")
 
 
 class Requester:
