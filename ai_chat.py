@@ -7,6 +7,7 @@ import threading
 import dataclasses
 import signal
 import shutil
+from enum import Enum
 
 
 class ColorCodeExeption(Exception):
@@ -156,8 +157,8 @@ class Buffer:
                 self.chat_data["messages"][-1]["content"] = self.chat_data["messages"][
                     -1
                 ]["content"][:-1]
-                self.updated = True
-                self.cond.notify()
+            self.updated = True
+            self.cond.notify()
 
     def clear_msg(self):
         with self.cond:
@@ -201,14 +202,7 @@ class Buffer:
             flush=True,
         )
 
-    def get_text_box(self, width, last=-1) -> str:
-        if self.show_data:
-            return self._get_text_box_data(width, last)
-        if self.show_system:
-            return self._get_text_box_system(width, last)
-        return self._get_text_box_normal(width, last)
-
-    def _get_text_box_system(self, width, last=-1) -> str:
+    def get_text_box_system(self, width, last=-1) -> str:
         result = TextBox()
         res = []
         res += [f"{self.normal_color}system:"]
@@ -226,10 +220,10 @@ class Buffer:
         result.lines = res
         return result
 
-    def _get_text_box_data(self, width, last=-1) -> str:
+    def get_text_box_data(self, width, last=-1) -> str:
         return make_text_box(json.dumps(self.chat_data, indent=4), width, last=last)
 
-    def _get_text_box_normal(self, width, last=-1) -> str:
+    def get_text_box(self, width, last=-1) -> str:
         result = TextBox()
         res = []
         if len(self.chat_data["messages"]) == 1:
@@ -380,6 +374,12 @@ class Requester:
         chat.in_request = False
 
 
+class State(Enum):
+    NORMAL = 0
+    SYSTEM = 1
+    DATA = 2
+
+
 class Supervisor:
     def __init__(self) -> None:
         self.buffers = [Buffer()]
@@ -398,6 +398,7 @@ class Supervisor:
         size = shutil.get_terminal_size()
         self.columns = size.columns
         self.lines = size.lines
+        self.state = State.NORMAL
         signal.signal(signal.SIGWINCH, self.handle_sigwinch)
 
     @property
@@ -439,20 +440,17 @@ class Supervisor:
         match command[0]:
             case "/n":
                 with self.current_buffer.cond:
-                    self.current_buffer.show_data = False
-                    self.current_buffer.show_system = False
+                    self.state = State.NORMAL
                     self.current_buffer.updated = True
                     self.current_buffer.cond.notify()
             case "/d":
                 with self.current_buffer.cond:
-                    self.current_buffer.show_data = True
-                    self.current_buffer.show_system = False
+                    self.state = State.DATA
                     self.current_buffer.updated = True
                     self.current_buffer.cond.notify()
             case "/S":
                 with self.current_buffer.cond:
-                    self.current_buffer.show_system = True
-                    self.current_buffer.show_data = False
+                    self.state = State.SYSTEM
                     self.current_buffer.updated = True
                     self.current_buffer.cond.notify()
             case "/s":
@@ -494,7 +492,7 @@ class Supervisor:
                 if len(command) >= 2:
                     self.current_data["model"] = command[1]
                 else:
-                    self.current_buffer.print_normal("no model given")
+                    pass  # TODO handle error state
             case _:
                 pass
         return True
@@ -615,6 +613,7 @@ class Supervisor:
                                 self.current_buffer.cond.notify()
                     else:
                         self.buffer_start = -1
+                        self.state = State.NORMAL
                         self.current_buffer.del_user()
                     continue
                 if 32 <= ord(ch) <= 126:
@@ -624,6 +623,7 @@ class Supervisor:
                         self.update_command()
                     elif not self.current_buffer.in_request and not is_command:
                         self.buffer_start = -1
+                        self.state = State.NORMAL
                         self.current_buffer.add_user(ch)
                     else:
                         self.command += ch
@@ -647,14 +647,25 @@ class Supervisor:
                     return
                 if len(self.current_data["messages"]) == 0:
                     self.current_buffer.add_msg("system")
+                match self.state:
+                    case State.NORMAL:
+                        box = self.current_buffer.get_text_box(
+                            self.columns - 4, self.buffer_start
+                        )
+                        hide_cursor = False
+                    case State.SYSTEM:
+                        box = self.current_buffer.get_text_box_system(
+                            self.columns - 4, self.buffer_start
+                        )
+                        hide_cursor = True
+                    case State.DATA:
+                        box = self.current_buffer.get_text_box_data(
+                            self.columns - 4, self.buffer_start
+                        )
+                        hide_cursor = True
+
                 self.buffer_lines = fit_to_box(
-                    self.current_buffer.get_text_box(
-                        self.columns - 4, self.buffer_start
-                    ),
-                    self.columns - 4,
-                    self.lines - 5,
-                    2,
-                    3,
+                    box, self.columns - 4, self.lines - 5, 2, 3, hide_cursor=hide_cursor
                 )
                 self.current_buffer.updated = False
 
