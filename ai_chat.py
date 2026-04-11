@@ -42,10 +42,10 @@ def fit_to_box(
     box, width, height, start_x=1, start_y=1, background="", hide_cursor=False
 ):
     # clean box
-    print(f"\033[{start_x};{start_y}H", end="")
-    for x in range(height):
-        print(f"{background}\033[{start_x+x};{start_y}H", end="")
-        print(width * " ", end="")
+    # print(f"\033[{start_x};{start_y}H", end="")
+    # for x in range(height):
+    #    print(f"{background}\033[{start_x+x};{start_y}H", end="")
+    #    print(width * " ", end="")
 
     lines, last = (box.lines, box.last)
 
@@ -61,6 +61,8 @@ def fit_to_box(
         start = max(0, last - height)
     print(f"\033[{start_x};{start_y}H", end="", flush=True)
     for x, line in enumerate(lines[start:last]):
+        print(f"\033[{start_x+x};{start_y}H", end="")
+        print(f"{background}{width * ' '}", end="")
         print(f"\033[{start_x+x};{start_y}H", end="")
         print(
             line,
@@ -547,7 +549,7 @@ class Supervisor:
                 self.lines,
                 1,
                 "\033[32m",
-                "\033[46",
+                "\033[0m",
                 hide_cursor=True,
             )
         else:
