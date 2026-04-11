@@ -72,7 +72,9 @@ def fit_to_box(
             end="",
         )
     print("\033[0m", end="", flush=True)
-    return len(lines)
+    if box.last == -1:
+        return (len(lines), -1)
+    return (len(lines), max(last, height))
 
 
 def fit_text_to_box(
@@ -85,7 +87,7 @@ def fit_text_to_box(
     background="",
     hide_cursor=False,
 ):
-    fit_to_box(
+    return fit_to_box(
         make_text_box(text, width, color=color),
         width,
         height,
@@ -357,6 +359,7 @@ class State(Enum):
     NORMAL = 0
     SYSTEM = 1
     DATA = 2
+    HELP = 3
 
 
 class Supervisor:
@@ -417,6 +420,12 @@ class Supervisor:
         if command[0] == "/q":
             return False
         match command[0]:
+            case "/h":
+                with self.current_buffer.cond:
+                    self.buffer_start = 0
+                    self.state = State.HELP
+                    self.current_buffer.updated = True
+                    self.current_buffer.cond.notify()
             case "/n":
                 with self.current_buffer.cond:
                     self.state = State.NORMAL
@@ -424,6 +433,7 @@ class Supervisor:
                     self.current_buffer.cond.notify()
             case "/d":
                 with self.current_buffer.cond:
+                    self.buffer_start = 0
                     self.state = State.DATA
                     self.current_buffer.updated = True
                     self.current_buffer.cond.notify()
@@ -642,8 +652,12 @@ class Supervisor:
                             self.columns - 4, self.buffer_start
                         )
                         hide_cursor = True
+                    case State.HELP:
+                        box = make_text_box(
+                            "THERE IS NO HELP", self.columns - 4, self.buffer_start
+                        )
 
-                self.buffer_lines = fit_to_box(
+                (self.buffer_lines, self.buffer_start) = fit_to_box(
                     box, self.columns - 4, self.lines - 5, 2, 3, hide_cursor=hide_cursor
                 )
                 self.current_buffer.updated = False
