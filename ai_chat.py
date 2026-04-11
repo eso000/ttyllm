@@ -52,12 +52,7 @@ def fit_to_box(
     start = 0
     if last < 0:
         last = len(lines)
-        print("\033[?25h", end="")
-    else:
-        print("\033[?25l", end="")
-
-    if hide_cursor:
-        print("\033[?25l", end="")
+    print("\033[?25l", end="")
 
     if len(lines) <= height:
         last = len(lines)
@@ -72,6 +67,12 @@ def fit_to_box(
             end="",
         )
     print("\033[0m", end="", flush=True)
+
+    if box.last != -1 or hide_cursor:
+        print("\033[?25l", end="", flush=True)
+    else:
+        print("\033[?25h", end="", flush=True)
+
     if box.last == -1:
         return (len(lines), -1)
     return (len(lines), max(last, height))
