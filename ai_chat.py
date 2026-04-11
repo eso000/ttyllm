@@ -37,7 +37,9 @@ def make_text_box(text, width, last=-1, color="") -> TextBox:
     return res
 
 
-def fit_to_box(box, width, height, start_x=1, start_y=1, background=""):
+def fit_to_box(
+    box, width, height, start_x=1, start_y=1, background="", hide_cursor=False
+):
     # clean box
     print(f"\033[{start_x};{start_y}H", end="")
     for x in range(height):
@@ -49,6 +51,13 @@ def fit_to_box(box, width, height, start_x=1, start_y=1, background=""):
     start = 0
     if last < 0:
         last = len(lines)
+        print("\033[?25h", end="")
+    else:
+        print("\033[?25l", end="")
+
+    if hide_cursor:
+        print("\033[?25l", end="")
+
     if len(lines) <= height:
         last = len(lines)
     last = max(last, height)
@@ -65,7 +74,16 @@ def fit_to_box(box, width, height, start_x=1, start_y=1, background=""):
     return len(lines)
 
 
-def fit_text_to_box(text, width, height, start_x=1, start_y=1, color="", background=""):
+def fit_text_to_box(
+    text,
+    width,
+    height,
+    start_x=1,
+    start_y=1,
+    color="",
+    background="",
+    hide_cursor=False,
+):
     fit_to_box(
         make_text_box(text, width, color=color),
         width,
@@ -73,6 +91,7 @@ def fit_text_to_box(text, width, height, start_x=1, start_y=1, color="", backgro
         start_x,
         start_y,
         background,
+        hide_cursor,
     )
 
 
@@ -477,7 +496,7 @@ class Supervisor:
                 else:
                     self.current_buffer.print_normal("no model given")
             case _:
-                self.current_buffer.print_normal(f"Unknown command: {command[0]}")
+                pass
         return True
 
     def handle_new_message(self):
@@ -523,6 +542,8 @@ class Supervisor:
                 self.buffer_start = -1
         if buffer == "[D":
             self.buffer_start = -1
+        if buffer == "[C":
+            self.buffer_start = 1
         with self.current_buffer.cond:
             self.current_buffer.updated = True
             self.current_buffer.cond.notify()
@@ -530,7 +551,14 @@ class Supervisor:
     def update_command(self):
         if self.command == "":
             fit_text_to_box(
-                self.columns * " ", self.columns, 1, self.lines, 1, "\033[0m"
+                f"    model: {self.current_data['model']} -- tokens: {self.current_buffer.tokens}",
+                self.columns,
+                1,
+                self.lines,
+                1,
+                "\033[32m",
+                "\033[46",
+                hide_cursor=True,
             )
         else:
             fit_text_to_box(
@@ -544,10 +572,13 @@ class Supervisor:
             ch = sys.stdin.read(1)
             with self.input_cond:
                 if ord(ch) == 21:
+                    input_length = 0
                     if self.command:
                         self.command = ""
-                        self.update_command()
                         is_command = False
+                        with self.current_buffer.cond:
+                            self.current_buffer.updated = True
+                            self.current_buffer.cond.notify()
                     else:
                         self.current_buffer.clear_msg()
                 if ord(ch) == 27:
@@ -576,10 +607,14 @@ class Supervisor:
                     input_length -= 1
                     if is_command:
                         self.command = self.command[0:-1]
+                        self.update_command()
                         if input_length == 0:
                             is_command = False
-                        self.update_command()
+                            with self.current_buffer.cond:
+                                self.current_buffer.updated = True
+                                self.current_buffer.cond.notify()
                     else:
+                        self.buffer_start = -1
                         self.current_buffer.del_user()
                     continue
                 if 32 <= ord(ch) <= 126:
@@ -588,6 +623,7 @@ class Supervisor:
                         self.command = "/"
                         self.update_command()
                     elif not self.current_buffer.in_request and not is_command:
+                        self.buffer_start = -1
                         self.current_buffer.add_user(ch)
                     else:
                         self.command += ch
@@ -603,6 +639,7 @@ class Supervisor:
                     and not self.buffer_changed
                 ):
                     self.current_buffer.cond.wait()
+                self.update_command()
                 if self.buffer_changed:
                     self.buffer_changed = False
                     continue
@@ -644,6 +681,7 @@ class Supervisor:
             thread.join()
 
         clean_screan()
+        print("\033[?25h", end="", flush=True)
         print("\033[?1049l", end="", flush=True)
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
