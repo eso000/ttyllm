@@ -202,6 +202,11 @@ class Buffer:
     def set_user_color(self, value: str) -> None:
         self.user_color = self._process_color(value)
 
+    def notify(self):
+        with self.cond:
+            self.updated = True
+            self.cond.notify()
+
     def get_text_box_system(self, width, last=-1) -> str:
         result = TextBox()
         res = []
@@ -302,6 +307,30 @@ class Requester:
             final += socket_.recv(min(self.max_recv, size - len(final)))
         return final
 
+    def get_models(self):
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.connect((self.host, self.port))
+        headers = [
+            "GET /api/tags HTTP/1.1",
+            f"HOST: {self.host}",
+        ]
+
+        request = "\r\n".join(headers) + "\r\n\r\n"
+        s.send(request.encode())
+
+        reply = s.recv(self.max_recv)
+        raw = reply.decode().split("\r\n\r\n")
+        if len(raw) < 2:
+            raw.append("")
+        length = raw[0][raw[0].find("Content-Length: ") :]
+        length = length[: max(len(length), length.find("\n"))]
+        size = int(length[15::])
+        final = raw[1].encode()
+        final += self._get_all(final, size + 1, s)
+        ret = json.loads(final.decode())
+        s.close()
+        return ret
+
     def get_reply(self, chat: Buffer) -> None:
         chat.cancel = False
         chat.in_request = True
@@ -347,7 +376,7 @@ class Requester:
             length = length[: max(len(length), length.find("\n"))]
             size = int(length[15::])
             final = raw[1].encode()
-            final += s.recv(min(self.max_recv, size - len(final)))
+            final += self._get_all(final, size + 2, s)
             msg = json.loads(final.decode())["message"]["content"]
             msg = msg.replace("\n", "\n\r")
             chat.add_ai(msg)
@@ -365,6 +394,7 @@ class State(Enum):
     SYSTEM = 1
     DATA = 2
     HELP = 3
+    MODELS = 4
 
 
 class Supervisor:
@@ -388,6 +418,8 @@ class Supervisor:
         self.state = State.NORMAL
         signal.signal(signal.SIGWINCH, self.handle_sigwinch)
 
+        self.models = self.requester.get_models()
+
     @property
     def current_buffer(self):
         return self.buffers[self.current_buffer_id]
@@ -405,9 +437,7 @@ class Supervisor:
         self.lines = size.lines
         clean_screan()
         self.update_command()
-        with self.current_buffer.cond:
-            self.current_buffer.updated = True
-            self.current_buffer.cond.notify()
+        self.current_buffer.notify()
 
     def change_buffer(self, new_id):
         old_buffer = self.current_buffer
@@ -425,6 +455,12 @@ class Supervisor:
         if command[0] == "/q":
             return False
         match command[0]:
+            case "/m":
+                with self.current_buffer.cond:
+                    self.buffer_last = 0
+                    self.state = State.MODELS
+                    self.current_buffer.updated = True
+                    self.current_buffer.cond.notify()
             case "/h":
                 with self.current_buffer.cond:
                     self.buffer_last = 0
@@ -485,6 +521,7 @@ class Supervisor:
             case "/sm":
                 if len(command) >= 2:
                     self.current_data["model"] = command[1]
+                    self.current_buffer.notify()
                 else:
                     pass  # TODO handle error state
             case _:
@@ -662,6 +699,12 @@ class Supervisor:
                     case State.HELP:
                         box = make_text_box(
                             "THERE IS NO HELP", self.columns - 4, self.buffer_last
+                        )
+                    case State.MODELS:
+                        box = make_text_box(
+                            json.dumps(self.models, indent=4),
+                            self.columns - 4,
+                            self.buffer_last,
                         )
 
                 (self.buffer_lines, self.buffer_last) = fit_to_box(
