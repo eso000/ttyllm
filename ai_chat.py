@@ -116,7 +116,7 @@ class Buffer:
         self.show_system = False
         self.chat_data = {
             "model": "gemma2:2b",  # "mistral-nemo",
-            "stream": True,
+            "stream": False,
             "think": False,
             "messages": [],
         }
@@ -302,10 +302,34 @@ class Requester:
 
         return request
 
+    def _get_header(self, socket_):
+        reply = socket_.recv(self.max_recv)
+        while b"\r\n\r\n" not in reply:
+            reply += socket_.recv(self.max_recv)
+        raw = reply.decode().split("\r\n\r\n")
+        if len(raw) < 2:
+            raw.append("")
+        return raw
+
     def _get_all(self, final, size, socket_):
         while len(final) < size:
             final += socket_.recv(min(self.max_recv, size - len(final)))
         return final
+
+    def _handle_json(self, socket_, existing):
+        if "Transfer-Encoding: chunked" in existing[0]:
+            body = existing[1].encode()
+            while b"\r\n0\r\n\r\n" not in body:
+                body += socket_.recv(self.max_recv)
+            ret = json.loads(body.decode().split("\r\n")[1])
+        else:
+            length = existing[0][existing[0].find("Content-Length: ") :]
+            length = length[: max(len(length), length.find("\n"))]
+            size = int(length[15::])
+            final = self._get_all(existing[1].encode(), size, socket_)
+            ret = json.loads(final.decode())
+        socket_.close()
+        return ret
 
     def get_models(self):
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -318,18 +342,11 @@ class Requester:
         request = "\r\n".join(headers) + "\r\n\r\n"
         s.send(request.encode())
 
-        reply = s.recv(self.max_recv)
-        raw = reply.decode().split("\r\n\r\n")
-        if len(raw) < 2:
-            raw.append("")
-        length = raw[0][raw[0].find("Content-Length: ") :]
-        length = length[: max(len(length), length.find("\n"))]
-        size = int(length[15::])
-        final = raw[1].encode()
-        final += self._get_all(final, size + 1, s)
-        ret = json.loads(final.decode())
-        s.close()
-        return ret
+        raw = self._get_header(s)
+
+        if "Content-Type: application/json;" in raw[0]:
+            return self._handle_json(s, raw)
+        return {}
 
     def get_reply(self, chat: Buffer) -> None:
         chat.cancel = False
@@ -340,8 +357,7 @@ class Requester:
         s.send(self.make_post(chat.chat_data).encode())
 
         chat.add_msg("assistant")
-        reply = s.recv(self.max_recv)
-        raw = reply.decode().split("\r\n\r\n")
+        raw = self._get_header(s)
         if "HTTP/1.1 200 OK" not in raw[0]:
             for raw_ in raw:
                 print(raw_, end="\r\n")
@@ -372,18 +388,11 @@ class Requester:
                         + json.loads(final.decode())["eval_count"]
                     )
         if "Content-Type: application/json;" in raw[0]:
-            length = raw[0][raw[0].find("Content-Length: ") :]
-            length = length[: max(len(length), length.find("\n"))]
-            size = int(length[15::])
-            final = raw[1].encode()
-            final += self._get_all(final, size + 2, s)
-            msg = json.loads(final.decode())["message"]["content"]
-            msg = msg.replace("\n", "\n\r")
+            body = self._handle_json(s, raw)
+
+            msg = body["message"]["content"]
             chat.add_ai(msg)
-            chat.tokens = (
-                json.loads(final.decode())["prompt_eval_count"]
-                + json.loads(final.decode())["eval_count"]
-            )
+            chat.tokens = body["prompt_eval_count"] + body["eval_count"]
         s.close()
         chat.add_msg("user")
         chat.in_request = False
@@ -419,6 +428,9 @@ class Supervisor:
         signal.signal(signal.SIGWINCH, self.handle_sigwinch)
 
         self.models = self.requester.get_models()
+        self.models_short = ""
+        for model in self.models["models"]:
+            self.models_short += f"{model["name"]}\t {model["size"] // 1073741824} GB\t{model["details"]["parameter_size"]}\n"
 
     @property
     def current_buffer(self):
@@ -702,7 +714,8 @@ class Supervisor:
                         )
                     case State.MODELS:
                         box = make_text_box(
-                            json.dumps(self.models, indent=4),
+                            # json.dumps(self.models, indent=4),
+                            self.models_short,
                             self.columns - 4,
                             self.buffer_last,
                         )
