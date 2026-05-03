@@ -10,6 +10,24 @@ import shutil
 from enum import Enum
 
 
+HELP_STRING = (
+    "/m  :\tshow models\n"
+    "/h  :\tshow help\n"
+    "/n  :\tshows normal chat\n"
+    "/d  :\tshow data\n"
+    "/S  :\tshow system prompt\n"
+    "/s  :\tcreates new buffer based on current one\n"
+    "/r  :\tregenarate last reply\n"
+    "/R  :\tstarts new begining by the system prompt\n"
+    "/rr :\treverts last user message\n"
+    "/bc :\tcreates new blank buffer\n"
+    "/bn :\tswitches to next buffer\n"
+    "/bp :\tswitches to previous buffer\n"
+    "/bd :\tdeletes current buffer\n"
+    "/sm :\tswithes model -- argument: target model\n"
+)
+
+
 class ColorCodeExeption(Exception):
     pass
 
@@ -708,7 +726,7 @@ class Supervisor:
                         hide_cursor = True
                     case State.HELP:
                         box = make_text_box(
-                            "THERE IS NO HELP", self.columns - 4, self.buffer_last
+                            HELP_STRING, self.columns - 4, self.buffer_last
                         )
                     case State.MODELS:
                         box = make_text_box(
