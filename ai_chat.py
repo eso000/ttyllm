@@ -446,7 +446,11 @@ class Supervisor:
         self.models = self.requester.get_models()
         self.models_short = ""
         for model in self.models["models"]:
-            self.models_short += f"{model["name"]:<20}\t {model["size"] // 1073741824:} GB\t{model["details"]["parameter_size"]}\n"
+            self.models_short += (
+                f"{model["name"]:<20}",
+                f"\t {model["size"] // 1073741824:} GB",
+                f"\t{model["details"]["parameter_size"]}\n",
+            )
 
     @property
     def current_buffer(self):
