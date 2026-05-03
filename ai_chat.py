@@ -116,7 +116,7 @@ class Buffer:
         self.show_system = False
         self.chat_data = {
             "model": "gemma2:2b",  # "mistral-nemo",
-            "stream": False,
+            "stream": True,
             "think": False,
             "messages": [],
         }
@@ -280,7 +280,7 @@ class Buffer:
 
 class Requester:
     def __init__(self, host="127.0.0.1", port=11434):
-        self.max_recv = 124
+        self.max_recv = 1024
         self.host = host
         self.port = port
 
@@ -363,31 +363,29 @@ class Requester:
                 print(raw_, end="\r\n")
             return
         if "Content-Type: application/x-ndjson" in raw[0]:
-            body = raw[1].split("\n")
-            size = int(body[0], 16)
-            final = body[1].encode()
-            final = self._get_all(final, size + 2, s)
-            body[1] = final.decode()
-            done = json.loads(body[1])["done"]
-            msg = json.loads(body[1])["message"]["content"]
-            msg = msg.replace("\n", "\r\n")
-            chat.add_ai(msg)
+            body = raw[1].splitlines()
+            done = False
             while not done and not chat.cancel:
-                body = s.recv(self.max_recv).decode().split("\n")
+                body = [x for x in body if x != ""]
+                if len(body) == 0:
+                    body = s.recv(self.max_recv).decode().splitlines()
                 size = int(body[0], 16)
-                final = body[1].encode()
-                final = self._get_all(final, size + 2, s)
-                body[1] = final.decode()
+                if size != len(body[1].encode()) + 1:
+                    final = body[1].encode()
+                    final = self._get_all(final, size + 2, s)
+                    body[1] = final.decode()
                 done = json.loads(body[1])["done"]
                 msg = json.loads(body[1])["message"]["content"]
-                msg = msg.replace("\n", "\r\n")
                 chat.add_ai(msg)
                 if done:
                     chat.tokens = (
-                        json.loads(final.decode())["prompt_eval_count"]
-                        + json.loads(final.decode())["eval_count"]
+                        json.loads(body[1])["prompt_eval_count"]
+                        + json.loads(body[1])["eval_count"]
                     )
-        if "Content-Type: application/json;" in raw[0]:
+                body.pop(0)
+                body.pop(0)
+
+        if "Content-Type: application/json;" in raw[1]:
             body = self._handle_json(s, raw)
 
             msg = body["message"]["content"]
@@ -430,7 +428,7 @@ class Supervisor:
         self.models = self.requester.get_models()
         self.models_short = ""
         for model in self.models["models"]:
-            self.models_short += f"{model["name"]}\t {model["size"] // 1073741824} GB\t{model["details"]["parameter_size"]}\n"
+            self.models_short += f"{model["name"]:<20}\t {model["size"] // 1073741824:} GB\t{model["details"]["parameter_size"]}\n"
 
     @property
     def current_buffer(self):
