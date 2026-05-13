@@ -122,6 +122,8 @@ def fit_text_to_box(
 
 
 class Buffer:
+    TOOLS = False
+
     def __init__(self):
         self.ai_name = "AI"
         self.user_name = "You"
@@ -133,11 +135,32 @@ class Buffer:
         self.show_data = False
         self.show_system = False
         self.chat_data = {
-            "model": "gemma2:2b",  # "mistral-nemo",
+            "model": "llama3.2",  # mistral-nemo",
             "stream": True,
             "think": False,
             "messages": [],
         }
+        if self.TOOLS:
+            self.chat_data["tools"] = [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "get_temperature",
+                        "description": "Get the current temperature for a city",
+                        "parameters": {
+                            "type": "object",
+                            "required": ["city"],
+                            "properties": {
+                                "city": {
+                                    "type": "string",
+                                    "description": "The name of the city",
+                                }
+                            },
+                        },
+                    },
+                }
+            ]
+
         self.tokens = -1
         self.cond = threading.Condition()
         self.in_request = False
@@ -153,7 +176,12 @@ class Buffer:
     def del_msg(self, number=1):
         with self.cond:
             for _ in range(number):
-                self.chat_data["messages"].pop()
+                curent_role = self.chat_data["messages"][-1]["role"]
+                initial_role = self.chat_data["messages"][-1]["role"]
+                while curent_role in (initial_role, "tool"):
+                    self.chat_data["messages"].pop()
+                    curent_role = self.chat_data["messages"][-1]["role"]
+
             self.updated = True
             self.cond.notify()
 
@@ -190,6 +218,12 @@ class Buffer:
             self.chat_data["messages"][-1]["content"] = ""
             self.updated = True
             self.cond.notify()
+
+    def add_ai_tool(self, tool_calls):
+        with self.cond:
+            if self.in_request:
+                if self.chat_data["messages"][-1].get("role") == "assistant":
+                    self.chat_data["messages"][-1]["tool_calls"] = tool_calls
 
     def add_ai(self, ch):
         with self.cond:
@@ -266,7 +300,7 @@ class Buffer:
             return result
 
         for msg_ in self.chat_data["messages"]:
-            if msg_["role"] == "system":
+            if msg_["role"] in ("system", "tool") or "tool_calls" in msg_:
                 continue
             color = self.user_color if msg_["role"] == "user" else self.ai_color
             name = self.user_name if msg_["role"] == "user" else self.ai_name
@@ -366,7 +400,27 @@ class Requester:
             return self._handle_json(s, raw)
         return {}
 
-    def get_reply(self, chat: Buffer) -> None:
+    def _handle_msg(self, chat: Buffer, body) -> (bool, bool):
+        call = False
+        msg = body["message"]["content"]
+        chat.add_ai(msg)
+        if body["done"]:
+            chat.tokens = body["prompt_eval_count"] + body["eval_count"]
+        if "tool_calls" in body["message"]:
+            call = True
+            chat.add_ai_tool(body["message"]["tool_calls"])
+            for tool_call in body["message"]["tool_calls"]:
+                chat.chat_data["messages"].append(
+                    {
+                        "role": "tool",
+                        "tool_name": tool_call["function"]["name"],
+                        "content": "42 degree Celsius",
+                    }
+                )
+        return (body["done"], call)
+
+    def get_reply(self, chat: Buffer, wrapped=False) -> None:
+        call = False
         chat.cancel = False
         chat.in_request = True
 
@@ -392,26 +446,21 @@ class Requester:
                     final = body[1].encode()
                     final = self._get_all(final, size + 2, s)
                     body[1] = final.decode()
-                done = json.loads(body[1])["done"]
-                msg = json.loads(body[1])["message"]["content"]
-                chat.add_ai(msg)
-                if done:
-                    chat.tokens = (
-                        json.loads(body[1])["prompt_eval_count"]
-                        + json.loads(body[1])["eval_count"]
-                    )
+                done, call = self._handle_msg(chat, json.loads(body[1]))
+                if call:
+                    break
                 body.pop(0)
                 body.pop(0)
 
         if "Content-Type: application/json;" in raw[1]:
             body = self._handle_json(s, raw)
-
-            msg = body["message"]["content"]
-            chat.add_ai(msg)
-            chat.tokens = body["prompt_eval_count"] + body["eval_count"]
+            _, call = self._handle_msg(chat, body)
         s.close()
-        chat.add_msg("user")
         chat.in_request = False
+        if call:
+            self.get_reply(chat, wrapped=True)
+        if not wrapped:
+            chat.add_msg("user")
 
 
 class State(Enum):
@@ -447,9 +496,9 @@ class Supervisor:
         self.models_short = ""
         for model in self.models["models"]:
             self.models_short += (
-                f"{model["name"]:<20}",
-                f"\t {model["size"] // 1073741824:} GB",
-                f"\t{model["details"]["parameter_size"]}\n",
+                f"{model["name"]:<20}"
+                f"\t {model["size"] // 1073741824:} GB"
+                f"\t{model["details"]["parameter_size"]}\n"
             )
 
     @property
@@ -774,4 +823,6 @@ class Supervisor:
 
 
 if __name__ == "__main__":
+    if "-t" in sys.argv:
+        Buffer.TOOLS = True
     Supervisor().run_chat()
