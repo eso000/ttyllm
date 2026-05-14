@@ -175,11 +175,13 @@ class Buffer:
 
     def del_msg(self, number=1):
         with self.cond:
-            for _ in range(number):
+            for _ in range(min(number, len(self.chat_data["messages"]))):
                 curent_role = self.chat_data["messages"][-1]["role"]
                 initial_role = self.chat_data["messages"][-1]["role"]
                 while curent_role in (initial_role, "tool"):
                     self.chat_data["messages"].pop()
+                    if len(self.chat_data["messages"]) == 0:
+                        break
                     curent_role = self.chat_data["messages"][-1]["role"]
 
             self.updated = True
@@ -191,18 +193,33 @@ class Buffer:
             self.updated = True
             self.cond.notify()
 
-    def add_user(self, ch):
+    def change_msg(self, role):
         with self.cond:
             if self.in_request:
                 return
-            if self.chat_data["messages"][-1].get("role") in ("user", "system"):
+            if self.chat_data["messages"][-1]["content"] == "":
+                self.chat_data["messages"][-1]["role"] = role
+            else:
+                self.chat_data["messages"].append({"role": role, "content": ""})
+            self.updated = True
+            self.cond.notify()
+
+    def add_open(self, ch):
+        with self.cond:
+            if self.in_request:
+                return
+            if self.chat_data["messages"][-1].get("role") in (
+                "user",
+                "system",
+                "assistant",
+            ):
                 self.chat_data["messages"][-1]["content"] += ch
                 self.show_data = False
                 self.show_system = False
                 self.updated = True
                 self.cond.notify()
 
-    def del_user(self):
+    def del_open(self):
         with self.cond:
             if self.in_request:
                 return
@@ -283,7 +300,10 @@ class Buffer:
     def get_text_box(self, width, last=-1) -> str:
         result = TextBox()
         res = []
-        if len(self.chat_data["messages"]) == 1:
+        if (
+            len(self.chat_data["messages"]) == 1
+            and self.chat_data["messages"][0]["role"] == "system"
+        ):
             res += [f"{self.normal_color}system:"]
             msg_ = self.chat_data["messages"][0]
             if msg_["content"] == "":
@@ -601,13 +621,18 @@ class Supervisor:
                     self.current_buffer.cond.notify()
                     with cond:
                         cond.notify()
-
             case "sm":
                 if len(command) >= 2:
                     self.current_data["model"] = command[1]
                     self.current_buffer.notify()
                 else:
                     pass  # TODO handle error state
+            case "ai":
+                self.current_buffer.change_msg("assistant")
+            case "us":
+                self.current_buffer.change_msg("user")
+            case "sys":
+                self.current_buffer.change_msg("system")
             case _:
                 pass
         return True
@@ -615,10 +640,7 @@ class Supervisor:
     def handle_new_message(self):
         content = self.current_data["messages"][-1]["content"].replace("\\n", "\n")
         self.current_data["messages"][-1]["content"] = content
-        if (
-            len(self.current_data["messages"]) == 1
-            and self.current_data["messages"][0]["role"] == "system"
-        ):
+        if self.current_data["messages"][-1]["role"] != "user":
             self.current_buffer.add_msg("user")
         else:
             self.requester.get_reply(self.current_buffer)
@@ -731,7 +753,7 @@ class Supervisor:
                     else:
                         self.buffer_last = -1
                         self.state = State.NORMAL
-                        self.current_buffer.del_user()
+                        self.current_buffer.del_open()
                     continue
                 if 32 <= ord(ch) <= 126:
                     if input_length == 0 and ch in ("/", ":"):
@@ -741,7 +763,7 @@ class Supervisor:
                     elif not self.current_buffer.in_request and not is_command:
                         self.buffer_last = -1
                         self.state = State.NORMAL
-                        self.current_buffer.add_user(ch)
+                        self.current_buffer.add_open(ch)
                     else:
                         self.command += ch
                         self.update_command()
