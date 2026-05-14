@@ -531,62 +531,65 @@ class Supervisor:
 
     def process_command(self) -> bool:
         command = self.command.split(" ")
+        if command[0][0] not in (":", "/"):
+            return True
+        command[0] = command[0][1:]
         self.command = ""
         self.update_command()
-        if command[0] == "/q":
+        if command[0] == "q":
             return False
         match command[0]:
-            case "/m":
+            case "m":
                 with self.current_buffer.cond:
                     self.buffer_last = 0
                     self.state = State.MODELS
                     self.current_buffer.updated = True
                     self.current_buffer.cond.notify()
-            case "/h":
+            case "h":
                 with self.current_buffer.cond:
                     self.buffer_last = 0
                     self.state = State.HELP
                     self.current_buffer.updated = True
                     self.current_buffer.cond.notify()
-            case "/n":
+            case "n":
                 with self.current_buffer.cond:
                     self.state = State.NORMAL
                     self.current_buffer.updated = True
                     self.current_buffer.cond.notify()
-            case "/d":
+            case "d":
                 with self.current_buffer.cond:
                     self.buffer_last = 0
                     self.state = State.DATA
                     self.current_buffer.updated = True
                     self.current_buffer.cond.notify()
-            case "/S":
+            case "S":
                 with self.current_buffer.cond:
                     self.state = State.SYSTEM
                     self.current_buffer.updated = True
                     self.current_buffer.cond.notify()
-            case "/s":
+            case "s":
                 new = Buffer()
                 new.chat_data = json.loads(json.dumps(self.current_data))
                 self.buffers.append(new)
                 self.change_buffer(len(self.buffers) - 1)
-            case "/r":
+            case "r":
                 self.current_buffer.del_msg(2)
                 self.requester.get_reply(self.current_buffer)
-            case "/R":
+            case "R":
                 self.current_buffer.empty()
-            case "/rr":
+            case "rr":
                 self.current_buffer.del_msg(3)
                 self.current_buffer.add_msg("user")
-            case "/bc":
+            case "bc":
                 self.buffers.append(Buffer())
                 self.change_buffer(len(self.buffers) - 1)
-            case "/bn":
+            case "bn":
                 if self.current_buffer_id < len(self.buffers) - 1:
                     self.change_buffer(self.current_buffer_id + 1)
-            case "/bp":
+            case "bp":
                 if self.current_buffer_id > 0:
                     self.change_buffer(self.current_buffer_id - 1)
-            case "/bd":
+            case "bd":
                 cond = self.current_buffer.cond
                 self.buffers.pop(self.current_buffer_id)
                 if len(self.buffers) == 0:
@@ -599,7 +602,7 @@ class Supervisor:
                     with cond:
                         cond.notify()
 
-            case "/sm":
+            case "sm":
                 if len(command) >= 2:
                     self.current_data["model"] = command[1]
                     self.current_buffer.notify()
@@ -636,7 +639,7 @@ class Supervisor:
     def handle_escape_sequence(self):
         buffer = ""
         ch = 27
-        while ch not in ["A", "B", "C", "D", "~"]:
+        while ch not in ("A", "B", "C", "D", "~"):
             ch = sys.stdin.read(1)
             buffer += ch
         if buffer == "[A" or buffer.startswith("OA"):
@@ -700,7 +703,7 @@ class Supervisor:
                     self.handle_sigint()
                 if not ch or ch == "\r" or ch == "\n":
                     if is_command:
-                        if self.command == "/q":
+                        if self.command in ("/q", ":q"):
                             self.run = False
                             self.handle_sigint()
                             with self.current_buffer.cond:
@@ -731,9 +734,9 @@ class Supervisor:
                         self.current_buffer.del_user()
                     continue
                 if 32 <= ord(ch) <= 126:
-                    if input_length == 0 and ch == "/":
+                    if input_length == 0 and ch in ("/", ":"):
                         is_command = True
-                        self.command = "/"
+                        self.command = ch
                         self.update_command()
                     elif not self.current_buffer.in_request and not is_command:
                         self.buffer_last = -1
