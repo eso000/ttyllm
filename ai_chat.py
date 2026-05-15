@@ -663,7 +663,10 @@ class Supervisor:
         ch = 27
         while ch not in ("A", "B", "C", "D", "~"):
             ch = sys.stdin.read(1)
+            if ord(ch) == 27:
+                return
             buffer += ch
+
         if buffer == "[A" or buffer.startswith("OA"):
             if self.buffer_last < 0:
                 self.buffer_last = self.buffer_lines - 1
