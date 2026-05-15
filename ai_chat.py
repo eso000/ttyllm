@@ -271,6 +271,28 @@ class Buffer:
     def set_user_color(self, value: str) -> None:
         self.user_color = self._process_color(value)
 
+    def set_data(self, data):
+        def _check_dict(_dict, _key, _instance):
+            if _key not in _dict:
+                return True
+            if not isinstance(_dict[_key], _instance):
+                return True
+            return False
+
+        if _check_dict(data, "model", str):
+            return
+        if _check_dict(data, "messages", list):
+            return
+        for msg in data["messages"]:
+            if _check_dict(msg, "role", str):
+                return
+            if _check_dict(msg, "content", str) or _check_dict(msg, "tool_calls", list):
+                return
+        with self.cond:
+            self.chat_data = data
+            self.updated = True
+            self.cond.notify()
+
     def notify(self):
         with self.cond:
             self.updated = True
@@ -633,6 +655,16 @@ class Supervisor:
                 self.current_buffer.change_msg("user")
             case "sys":
                 self.current_buffer.change_msg("system")
+            case "import":
+                with open(command[1], "r", encoding="utf-8") as file:
+                    try:
+                        data = json.load(file)
+                        self.current_buffer.set_data(data)
+                    except json.JSONDecodeError:
+                        pass
+            case "export":
+                with open(command[1], "w", encoding="utf-8") as file:
+                    json.dump(self.current_data, file, indent=4)
             case _:
                 pass
         return True
