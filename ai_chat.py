@@ -673,7 +673,7 @@ class Supervisor:
         content = self.current_data["messages"][-1]["content"].replace("\\n", "\n")
         self.current_data["messages"][-1]["content"] = content
         if self.current_data["messages"][-1]["role"] != "user":
-            self.current_buffer.add_msg("user")
+            self.current_buffer.change_msg("user")
         else:
             self.requester.get_reply(self.current_buffer)
 
