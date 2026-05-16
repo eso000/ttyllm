@@ -50,6 +50,9 @@ def make_text_box(text, width, last=-1, color="") -> TextBox:
         return res
     res_lines = text.split("\n")
     for part in res_lines:
+        if part == "":
+            res.lines += [""]
+            continue
         res.lines += [
             f"{color}{part[i : i + width]}" for i in range(0, len(part), width)
         ]
@@ -223,7 +226,11 @@ class Buffer:
         with self.cond:
             if self.in_request:
                 return
-            if self.chat_data["messages"][-1].get("role") in ("user", "system"):
+            if self.chat_data["messages"][-1].get("role") in (
+                "user",
+                "system",
+                "assistant",
+            ):
                 self.chat_data["messages"][-1]["content"] = self.chat_data["messages"][
                     -1
                 ]["content"][:-1]
@@ -473,9 +480,8 @@ class Requester:
         chat.add_msg("assistant")
         raw = self._get_header(s)
         if "HTTP/1.1 200 OK" not in raw[0]:
-            for raw_ in raw:
-                print(raw_, end="\r\n")
-            return
+            chat.in_request = False
+            return "\n".join(raw)
         if "Content-Type: application/x-ndjson" in raw[0]:
             body = raw[1].splitlines()
             done = False
@@ -503,6 +509,7 @@ class Requester:
             self.get_reply(chat, wrapped=True)
         if not wrapped:
             chat.add_msg("user")
+        return None
 
 
 class State(Enum):
@@ -511,6 +518,7 @@ class State(Enum):
     DATA = 2
     HELP = 3
     MODELS = 4
+    DIALOG = 5
 
 
 class Supervisor:
@@ -542,6 +550,8 @@ class Supervisor:
                 f"\t {model["size"] // 1073741824:} GB"
                 f"\t{model["details"]["parameter_size"]}\n"
             )
+        self.dialog = ""
+        self.dialog_reply = ""
 
     @property
     def current_buffer(self):
@@ -561,6 +571,13 @@ class Supervisor:
         clean_screan()
         self.update_command()
         self.current_buffer.notify()
+
+    def get_reply(self, buffer):
+        error = self.requester.get_reply(buffer)
+        if error:
+            self.dialog = f"{error}\n\n[ENTER] Dismiss"
+            self.state = State.DIALOG
+            self.current_buffer.notify()
 
     def change_buffer(self, new_id):
         old_buffer = self.current_buffer
@@ -616,7 +633,7 @@ class Supervisor:
                 self.change_buffer(len(self.buffers) - 1)
             case "r":
                 self.current_buffer.del_msg(2)
-                self.requester.get_reply(self.current_buffer)
+                self.get_reply(self.current_buffer)
             case "R":
                 self.current_buffer.empty()
             case "rr":
@@ -675,7 +692,7 @@ class Supervisor:
         if self.current_data["messages"][-1]["role"] != "user":
             self.current_buffer.change_msg("user")
         else:
-            self.requester.get_reply(self.current_buffer)
+            self.get_reply(self.current_buffer)
 
     def watcher(self):
         while self.run:
@@ -700,20 +717,27 @@ class Supervisor:
             buffer += ch
 
         if buffer == "[A" or buffer.startswith("OA"):
-            if self.buffer_last < 0:
-                self.buffer_last = self.buffer_lines - 1
+            if self.command != "":
+                pass
             else:
-                if self.buffer_last:
-                    self.buffer_last -= 1
+                if self.buffer_last < 0:
+                    self.buffer_last = self.buffer_lines - 1
+                else:
+                    if self.buffer_last:
+                        self.buffer_last -= 1
         if buffer == "[B" or buffer.startswith("OB"):
-            if 0 <= self.buffer_last < self.buffer_lines:
-                self.buffer_last += 1
+            if self.command != "":
+                pass
             else:
-                self.buffer_last = -1
+                if 0 <= self.buffer_last < self.buffer_lines:
+                    self.buffer_last += 1
+                else:
+                    self.buffer_last = -1
         if buffer == "[D":
             self.buffer_last = -1
         if buffer == "[C":
             self.buffer_last = 1
+
         with self.current_buffer.cond:
             self.current_buffer.updated = True
             self.current_buffer.cond.notify()
@@ -770,8 +794,12 @@ class Supervisor:
                         self.input_done = True
                         self.input_cond.notify()
                     else:
-                        self.input_done = True
-                        self.input_cond.notify()
+                        if self.state == State.NORMAL:
+                            self.input_done = True
+                            self.input_cond.notify()
+                        else:
+                            self.state = State.NORMAL
+                            self.current_buffer.notify()
                     input_length = 0
                 if ord(ch) == 127:
                     if input_length <= 0:
@@ -796,9 +824,14 @@ class Supervisor:
                         self.command = ch
                         self.update_command()
                     elif not self.current_buffer.in_request and not is_command:
-                        self.buffer_last = -1
-                        self.state = State.NORMAL
-                        self.current_buffer.add_open(ch)
+                        if self.state == State.DIALOG:
+                            self.state = State.NORMAL
+                            self.dialog_reply = ch
+                            self.current_buffer.notify()
+                        else:
+                            self.buffer_last = -1
+                            self.state = State.NORMAL
+                            self.current_buffer.add_open(ch)
                     else:
                         self.command += ch
                         self.update_command()
@@ -848,6 +881,13 @@ class Supervisor:
                             self.columns - 4,
                             self.buffer_last,
                         )
+                    case State.DIALOG:
+                        box = make_text_box(
+                            self.dialog,
+                            self.columns - 4,
+                            self.buffer_last,
+                        )
+                        hide_cursor = True
 
                 (self.buffer_lines, self.buffer_last) = fit_to_box(
                     box, self.columns - 4, self.lines - 5, 2, 3, hide_cursor=hide_cursor
