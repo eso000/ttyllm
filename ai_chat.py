@@ -553,6 +553,28 @@ class Supervisor:
         self.dialog = ""
         self.dialog_reply = ""
 
+        self.commands = {
+            "m": self.list_models,
+            "h": self.help,
+            "n": self.normal_view,
+            "d": self.show_data,
+            "S": self.show_system,
+            "s": self.split,
+            "r": self.redo,
+            "R": self.start_over,
+            "rr": self.undo,
+            "bc": self.create_buffer,
+            "bn": self.buffer_next,
+            "bp": self.buffer_previous,
+            "bd": self.buffer_delete,
+            "sm": self.switch_model,
+            "ai": self.change_ai,
+            "us": self.change_user,
+            "sys": self.change_system,
+            "i": self.import_chat,
+            "e": self.export_chat,
+        }
+
     @property
     def current_buffer(self):
         return self.buffers[self.current_buffer_id]
@@ -588,6 +610,112 @@ class Supervisor:
                 old_buffer.cond.notify()
             self.current_buffer.cond.notify()
 
+    def list_models(self, *args):  # pylint: disable=unused-argument
+        with self.current_buffer.cond:
+            self.buffer_last = 0
+            self.state = State.MODELS
+            self.current_buffer.updated = True
+            self.current_buffer.cond.notify()
+
+    def help(self, *args):  # pylint: disable=unused-argument
+        with self.current_buffer.cond:
+            self.buffer_last = 0
+            self.state = State.HELP
+            self.current_buffer.updated = True
+            self.current_buffer.cond.notify()
+
+    def normal_view(self, *args):  # pylint: disable=unused-argument
+        with self.current_buffer.cond:
+            self.state = State.NORMAL
+            self.current_buffer.updated = True
+            self.current_buffer.cond.notify()
+
+    def show_data(self, *args):  # pylint: disable=unused-argument
+        with self.current_buffer.cond:
+            self.buffer_last = 0
+            self.state = State.DATA
+            self.current_buffer.updated = True
+            self.current_buffer.cond.notify()
+
+    def show_system(self, *args):  # pylint: disable=unused-argument
+        with self.current_buffer.cond:
+            self.state = State.SYSTEM
+            self.current_buffer.updated = True
+            self.current_buffer.cond.notify()
+
+    def split(self, *args):  # pylint: disable=unused-argument
+        new = Buffer()
+        new.chat_data = json.loads(json.dumps(self.current_data))
+        self.buffers.append(new)
+        self.change_buffer(len(self.buffers) - 1)
+
+    def redo(self, *args):  # pylint: disable=unused-argument
+        self.current_buffer.del_msg(2)
+        self.get_reply(self.current_buffer)
+
+    def start_over(self, *args):  # pylint: disable=unused-argument
+        self.current_buffer.empty()
+
+    def undo(self, *args):  # pylint: disable=unused-argument
+        self.current_buffer.del_msg(3)
+        self.current_buffer.add_msg("user")
+
+    def create_buffer(self, *args):  # pylint: disable=unused-argument
+        self.buffers.append(Buffer())
+        self.change_buffer(len(self.buffers) - 1)
+
+    def buffer_next(self, *args):  # pylint: disable=unused-argument
+        if self.current_buffer_id < len(self.buffers) - 1:
+            self.change_buffer(self.current_buffer_id + 1)
+
+    def buffer_previous(self, *args):  # pylint: disable=unused-argument
+        if self.current_buffer_id > 0:
+            self.change_buffer(self.current_buffer_id - 1)
+
+    def buffer_delete(self, *args):  # pylint: disable=unused-argument
+        cond = self.current_buffer.cond
+        self.buffers.pop(self.current_buffer_id)
+        if len(self.buffers) == 0:
+            self.buffers.append(Buffer())
+        if self.current_buffer_id == len(self.buffers):
+            self.current_buffer_id -= 1
+        with self.current_buffer.cond:
+            self.current_buffer.updated = True
+            self.current_buffer.cond.notify()
+            with cond:
+                cond.notify()
+
+    def switch_model(self, *args):
+        if len(args) < 1:
+            return
+        self.current_data["model"] = args[0]
+        self.current_buffer.notify()
+
+    def change_ai(self, *args):  # pylint: disable=unused-argument
+        self.current_buffer.change_msg("assistant")
+
+    def change_user(self, *args):  # pylint: disable=unused-argument
+        self.current_buffer.change_msg("user")
+
+    def change_system(self, *args):  # pylint: disable=unused-argument
+        self.current_buffer.change_msg("system")
+
+    def import_chat(self, *args):
+        if len(args) < 1:
+            return
+        with open(args[0], "r", encoding="utf-8") as file:
+            try:
+                data = json.load(file)
+                self.current_buffer.set_data(data)
+            except json.JSONDecodeError:
+                pass
+
+    def export_chat(self, *args):
+        if len(args) < 1:
+            return
+        with open(args[0], "w", encoding="utf-8") as file:
+            json.dump(self.current_data, file, indent=4)
+
     def process_command(self) -> bool:
         command = self.command.split(" ")
         if command[0][0] not in (":", "/"):
@@ -597,93 +725,8 @@ class Supervisor:
         self.update_command()
         if command[0] == "q":
             return False
-        match command[0]:
-            case "m":
-                with self.current_buffer.cond:
-                    self.buffer_last = 0
-                    self.state = State.MODELS
-                    self.current_buffer.updated = True
-                    self.current_buffer.cond.notify()
-            case "h":
-                with self.current_buffer.cond:
-                    self.buffer_last = 0
-                    self.state = State.HELP
-                    self.current_buffer.updated = True
-                    self.current_buffer.cond.notify()
-            case "n":
-                with self.current_buffer.cond:
-                    self.state = State.NORMAL
-                    self.current_buffer.updated = True
-                    self.current_buffer.cond.notify()
-            case "d":
-                with self.current_buffer.cond:
-                    self.buffer_last = 0
-                    self.state = State.DATA
-                    self.current_buffer.updated = True
-                    self.current_buffer.cond.notify()
-            case "S":
-                with self.current_buffer.cond:
-                    self.state = State.SYSTEM
-                    self.current_buffer.updated = True
-                    self.current_buffer.cond.notify()
-            case "s":
-                new = Buffer()
-                new.chat_data = json.loads(json.dumps(self.current_data))
-                self.buffers.append(new)
-                self.change_buffer(len(self.buffers) - 1)
-            case "r":
-                self.current_buffer.del_msg(2)
-                self.get_reply(self.current_buffer)
-            case "R":
-                self.current_buffer.empty()
-            case "rr":
-                self.current_buffer.del_msg(3)
-                self.current_buffer.add_msg("user")
-            case "bc":
-                self.buffers.append(Buffer())
-                self.change_buffer(len(self.buffers) - 1)
-            case "bn":
-                if self.current_buffer_id < len(self.buffers) - 1:
-                    self.change_buffer(self.current_buffer_id + 1)
-            case "bp":
-                if self.current_buffer_id > 0:
-                    self.change_buffer(self.current_buffer_id - 1)
-            case "bd":
-                cond = self.current_buffer.cond
-                self.buffers.pop(self.current_buffer_id)
-                if len(self.buffers) == 0:
-                    self.buffers.append(Buffer())
-                if self.current_buffer_id == len(self.buffers):
-                    self.current_buffer_id -= 1
-                with self.current_buffer.cond:
-                    self.current_buffer.updated = True
-                    self.current_buffer.cond.notify()
-                    with cond:
-                        cond.notify()
-            case "sm":
-                if len(command) >= 2:
-                    self.current_data["model"] = command[1]
-                    self.current_buffer.notify()
-                else:
-                    pass  # TODO handle error state
-            case "ai":
-                self.current_buffer.change_msg("assistant")
-            case "us":
-                self.current_buffer.change_msg("user")
-            case "sys":
-                self.current_buffer.change_msg("system")
-            case "import":
-                with open(command[1], "r", encoding="utf-8") as file:
-                    try:
-                        data = json.load(file)
-                        self.current_buffer.set_data(data)
-                    except json.JSONDecodeError:
-                        pass
-            case "export":
-                with open(command[1], "w", encoding="utf-8") as file:
-                    json.dump(self.current_data, file, indent=4)
-            case _:
-                pass
+        if command[0] in self.commands:
+            self.commands[command[0]](*command[1:])
         return True
 
     def handle_new_message(self):
