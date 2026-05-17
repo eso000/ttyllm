@@ -10,24 +10,6 @@ import shutil
 from enum import Enum
 
 
-HELP_STRING = (
-    "/m  :\tshow models\n"
-    "/h  :\tshow help\n"
-    "/n  :\tshows normal chat\n"
-    "/d  :\tshow data\n"
-    "/S  :\tshow system prompt\n"
-    "/s  :\tcreates new buffer based on current one\n"
-    "/r  :\tregenarate last reply\n"
-    "/R  :\tstarts new begining by the system prompt\n"
-    "/rr :\treverts last user message\n"
-    "/bc :\tcreates new blank buffer\n"
-    "/bn :\tswitches to next buffer\n"
-    "/bp :\tswitches to previous buffer\n"
-    "/bd :\tdeletes current buffer\n"
-    "/sm :\tswithes model -- argument: target model\n"
-)
-
-
 class ColorCodeExeption(Exception):
     pass
 
@@ -38,6 +20,19 @@ class TextBox:
     last = -1
 
 
+def text_to_lines(text, width, color=""):
+    if text == "":
+        return [""]
+    res = []
+    res_lines = text.split("\n")
+    for line in res_lines:
+        if line == "":
+            res.append("")
+        else:
+            res += [f"{color}{line[i : i + width]}" for i in range(0, len(line), width)]
+    return res
+
+
 def clean_screan() -> None:
     print("\033[H\033[J\033[3J", end="", flush=True)
 
@@ -45,17 +40,7 @@ def clean_screan() -> None:
 def make_text_box(text, width, last=-1, color="") -> TextBox:
     res = TextBox()
     res.last = last
-    if text == "":
-        res.lines = [""]
-        return res
-    res_lines = text.split("\n")
-    for part in res_lines:
-        if part == "":
-            res.lines += [""]
-            continue
-        res.lines += [
-            f"{color}{part[i : i + width]}" for i in range(0, len(part), width)
-        ]
+    res.lines = text_to_lines(text, width, color)
     return res
 
 
@@ -315,10 +300,13 @@ class Buffer:
         else:
             res_lines = msg_["content"].split("\n")
             for line in res_lines:
-                res += [
-                    f"{self.normal_color}{line[i : i + width]}"
-                    for i in range(0, len(line), width)
-                ]
+                if line == "":
+                    res.append("")
+                else:
+                    res += [
+                        f"{self.normal_color}{line[i : i + width]}"
+                        for i in range(0, len(line), width)
+                    ]
         result.last = last
         result.lines = res
         return result
@@ -335,15 +323,7 @@ class Buffer:
         ):
             res += [f"{self.normal_color}system:"]
             msg_ = self.chat_data["messages"][0]
-            if msg_["content"] == "":
-                res += [""]
-            else:
-                res_lines = msg_["content"].split("\n")
-                for line in res_lines:
-                    res += [
-                        f"{self.normal_color}{line[i : i + width]}"
-                        for i in range(0, len(line), width)
-                    ]
+            res += text_to_lines(msg_["content"], width, self.normal_color)
             result.last = last
             result.lines = res
             return result
@@ -354,15 +334,7 @@ class Buffer:
             color = self.user_color if msg_["role"] == "user" else self.ai_color
             name = self.user_name if msg_["role"] == "user" else self.ai_name
             res += [f"{self.normal_color}{name}:"]
-            if msg_["content"] == "":
-                res += [""]
-            else:
-                res_lines = msg_["content"].split("\n")
-                for line in res_lines:
-                    res += [
-                        f"{color}{line[i : i + width]}"
-                        for i in range(0, len(line), width)
-                    ]
+            res += text_to_lines(msg_["content"], width, color)
         result.last = last
         result.lines = res
         return result
