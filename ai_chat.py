@@ -610,7 +610,9 @@ class Supervisor:
                 old_buffer.cond.notify()
             self.current_buffer.cond.notify()
 
+    ############# internal commands
     def list_models(self, *args):  # pylint: disable=unused-argument
+        """list all models"""
         with self.current_buffer.cond:
             self.buffer_last = 0
             self.state = State.MODELS
@@ -618,6 +620,7 @@ class Supervisor:
             self.current_buffer.cond.notify()
 
     def help(self, *args):  # pylint: disable=unused-argument
+        """show help"""
         with self.current_buffer.cond:
             self.buffer_last = 0
             self.state = State.HELP
@@ -625,12 +628,14 @@ class Supervisor:
             self.current_buffer.cond.notify()
 
     def normal_view(self, *args):  # pylint: disable=unused-argument
+        """show chat"""
         with self.current_buffer.cond:
             self.state = State.NORMAL
             self.current_buffer.updated = True
             self.current_buffer.cond.notify()
 
     def show_data(self, *args):  # pylint: disable=unused-argument
+        """show data"""
         with self.current_buffer.cond:
             self.buffer_last = 0
             self.state = State.DATA
@@ -638,41 +643,50 @@ class Supervisor:
             self.current_buffer.cond.notify()
 
     def show_system(self, *args):  # pylint: disable=unused-argument
+        """show system prompt"""
         with self.current_buffer.cond:
             self.state = State.SYSTEM
             self.current_buffer.updated = True
             self.current_buffer.cond.notify()
 
     def split(self, *args):  # pylint: disable=unused-argument
+        """creates new buffer from current"""
         new = Buffer()
         new.chat_data = json.loads(json.dumps(self.current_data))
         self.buffers.append(new)
         self.change_buffer(len(self.buffers) - 1)
 
     def redo(self, *args):  # pylint: disable=unused-argument
+        """regenerate last message"""
         self.current_buffer.del_msg(2)
         self.get_reply(self.current_buffer)
 
     def start_over(self, *args):  # pylint: disable=unused-argument
+        """reset current buffer"""
         self.current_buffer.empty()
 
     def undo(self, *args):  # pylint: disable=unused-argument
+        """revert last user message"""
         self.current_buffer.del_msg(3)
         self.current_buffer.add_msg("user")
 
     def create_buffer(self, *args):  # pylint: disable=unused-argument
+        """create new blank buffer"""
         self.buffers.append(Buffer())
         self.change_buffer(len(self.buffers) - 1)
 
     def buffer_next(self, *args):  # pylint: disable=unused-argument
+        """switch to next buffer"""
         if self.current_buffer_id < len(self.buffers) - 1:
             self.change_buffer(self.current_buffer_id + 1)
 
     def buffer_previous(self, *args):  # pylint: disable=unused-argument
+        """switch to previous buffer"""
         if self.current_buffer_id > 0:
             self.change_buffer(self.current_buffer_id - 1)
 
     def buffer_delete(self, *args):  # pylint: disable=unused-argument
+        """delete current buffer"""
         cond = self.current_buffer.cond
         self.buffers.pop(self.current_buffer_id)
         if len(self.buffers) == 0:
@@ -686,21 +700,26 @@ class Supervisor:
                 cond.notify()
 
     def switch_model(self, *args):
+        """show models"""
         if len(args) < 1:
             return
         self.current_data["model"] = args[0]
         self.current_buffer.notify()
 
     def change_ai(self, *args):  # pylint: disable=unused-argument
+        """change current message to assistent"""
         self.current_buffer.change_msg("assistant")
 
     def change_user(self, *args):  # pylint: disable=unused-argument
+        """change current message to user"""
         self.current_buffer.change_msg("user")
 
     def change_system(self, *args):  # pylint: disable=unused-argument
+        """change current message to system"""
         self.current_buffer.change_msg("system")
 
     def import_chat(self, *args):
+        """import chat from file -- argument: file name"""
         if len(args) < 1:
             return
         with open(args[0], "r", encoding="utf-8") as file:
@@ -711,6 +730,7 @@ class Supervisor:
                 pass
 
     def export_chat(self, *args):
+        """export chat from file -- argument: file name"""
         if len(args) < 1:
             return
         with open(args[0], "w", encoding="utf-8") as file:
@@ -914,8 +934,11 @@ class Supervisor:
                         )
                         hide_cursor = True
                     case State.HELP:
+                        help_string = ""
+                        for name, function in self.commands.items():
+                            help_string += f"{name}:\t{function.__doc__}\n"
                         box = make_text_box(
-                            HELP_STRING, self.columns - 4, self.buffer_last
+                            help_string, self.columns - 4, self.buffer_last
                         )
                     case State.MODELS:
                         box = make_text_box(
