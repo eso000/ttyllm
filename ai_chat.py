@@ -24,7 +24,7 @@ def text_to_lines(text, width, color=""):
     if text == "":
         return [""]
     res = []
-    res_lines = text.split("\n")
+    res_lines = text.replace("\t", "   ").split("\n")
     for line in res_lines:
         if line == "":
             res.append("")
