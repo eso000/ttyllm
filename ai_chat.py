@@ -26,10 +26,25 @@ def text_to_lines(text, width, color=""):
     res = []
     res_lines = text.replace("\t", "   ").split("\n")
     for line in res_lines:
-        if line == "":
-            res.append("")
+        if len(line) <= width:
+            res.append(f"{color}{line}")
         else:
-            res += [f"{color}{line[i : i + width]}" for i in range(0, len(line), width)]
+            start = 0
+            while start <= len(line) - 1:
+                step = 0
+                line_fitting_part = line[start : start + width]
+                if len(line_fitting_part) + start < len(line):
+                    last_space = line_fitting_part.rfind(" ")
+                    if last_space != -1:
+                        number_of_selected_chars = last_space
+                        step = 1
+                    else:
+                        number_of_selected_chars = len(line_fitting_part)
+                else:
+                    number_of_selected_chars = width
+                res += [f"{color}{line_fitting_part[0:number_of_selected_chars]}"]
+                start += number_of_selected_chars + step
+
     return res
 
 
