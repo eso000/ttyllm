@@ -7,6 +7,7 @@ import threading
 import dataclasses
 import signal
 import shutil
+from glob import glob
 from enum import Enum
 
 
@@ -722,6 +723,8 @@ class Supervisor:
                     pass
         except PermissionError:
             self.create_dialog(f"insufficient permissions for {args[0]}")
+        except FileNotFoundError:
+            self.create_dialog(f"File {args[0]} not found")
 
     def export_chat(self, *args):
         """export chat from file -- argument: file name"""
@@ -732,6 +735,8 @@ class Supervisor:
                 json.dump(self.current_data, file, indent=4)
         except PermissionError:
             self.create_dialog(f"insufficient permissions for {args[0]}")
+        except FileNotFoundError:
+            self.create_dialog(f"File {args[0]} not found")
 
     def process_command(self) -> bool:
         command = self.command.split(" ")
