@@ -531,6 +531,7 @@ class Supervisor:
 
         self.models = self.requester.get_models()
         self.models_short = ""
+        self.models_list = [x["name"] for x in self.models["models"]]
         for model in self.models["models"]:
             self.models_short += (
                 f"{model["name"]:<20}"
@@ -570,6 +571,11 @@ class Supervisor:
     def current_data(self):
         return self.current_buffer.chat_data
 
+    def create_dialog(self, message):
+        self.dialog = f"{message}\n\n[ENTER] Dismiss"
+        self.state = State.DIALOG
+        self.current_buffer.notify()
+
     def handle_sigint(self):
         self.current_buffer.cancel = True
 
@@ -584,9 +590,7 @@ class Supervisor:
     def get_reply(self, buffer):
         error = self.requester.get_reply(buffer)
         if error:
-            self.dialog = f"{error}\n\n[ENTER] Dismiss"
-            self.state = State.DIALOG
-            self.current_buffer.notify()
+            self.create_dialog(error)
 
     def change_buffer(self, new_id):
         old_buffer = self.current_buffer
@@ -709,19 +713,25 @@ class Supervisor:
         """import chat from file -- argument: file name"""
         if len(args) < 1:
             return
-        with open(args[0], "r", encoding="utf-8") as file:
-            try:
-                data = json.load(file)
-                self.current_buffer.set_data(data)
-            except json.JSONDecodeError:
-                pass
+        try:
+            with open(args[0], "r", encoding="utf-8") as file:
+                try:
+                    data = json.load(file)
+                    self.current_buffer.set_data(data)
+                except json.JSONDecodeError:
+                    pass
+        except PermissionError:
+            self.create_dialog(f"insufficient permissions for {args[0]}")
 
     def export_chat(self, *args):
         """export chat from file -- argument: file name"""
         if len(args) < 1:
             return
-        with open(args[0], "w", encoding="utf-8") as file:
-            json.dump(self.current_data, file, indent=4)
+        try:
+            with open(args[0], "w", encoding="utf-8") as file:
+                json.dump(self.current_data, file, indent=4)
+        except PermissionError:
+            self.create_dialog(f"insufficient permissions for {args[0]}")
 
     def process_command(self) -> bool:
         command = self.command.split(" ")
@@ -886,6 +896,23 @@ class Supervisor:
                         self.command += ch
                         self.update_command()
                     input_length += 1
+                if ord(ch) == 9:
+                    if is_command:
+                        command_tokens = self.command.split(" ")
+                        if len(command_tokens) < 2:
+                            continue
+                        match command_tokens[0]:
+                            case ":sm" | "/sm":
+                                possible_models = [
+                                    x
+                                    for x in self.models_list
+                                    if x.startswith(command_tokens[1])
+                                ]
+                                if len(possible_models) == 1:
+                                    self.command += possible_models[0][
+                                        len(command_tokens) - 1 :
+                                    ]
+                                    self.update_command()
 
     def update_buffer(self):
         while self.run:
