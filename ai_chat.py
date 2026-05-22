@@ -294,7 +294,9 @@ class Buffer:
         for msg in data["messages"]:
             if _check_dict(msg, "role", str):
                 return
-            if _check_dict(msg, "content", str) or _check_dict(msg, "tool_calls", list):
+            if not _check_dict(msg, "content", str) and not _check_dict(
+                msg, "tool_calls", list
+            ):
                 return
         with self.cond:
             self.chat_data = data
@@ -720,7 +722,7 @@ class Supervisor:
                     data = json.load(file)
                     self.current_buffer.set_data(data)
                 except json.JSONDecodeError:
-                    pass
+                    self.create_dialog(f"File {args[0]} is corrupted")
         except PermissionError:
             self.create_dialog(f"insufficient permissions for {args[0]}")
         except FileNotFoundError:
@@ -916,6 +918,13 @@ class Supervisor:
                                 if len(possible_models) == 1:
                                     self.command += possible_models[0][
                                         len(command_tokens) - 1 :
+                                    ]
+                                    self.update_command()
+                            case ":e" | "/e" | ":i" | "/i":
+                                possible_completions = glob(f"{command_tokens[1]}*")
+                                if len(possible_completions) == 1:
+                                    self.command += possible_completions[0][
+                                        len(command_tokens[1]) :
                                     ]
                                     self.update_command()
 
