@@ -668,10 +668,10 @@ class Supervisor:
     def help(self, *args):  # pylint: disable=unused-argument
         """show help"""
         with self.current_buffer.cond:
-            self.buffer_last = 0
-            self.state = State.HELP
-            self.current_buffer.updated = True
-            self.current_buffer.cond.notify()
+            help_string = ""
+            for name, function in self.commands.items():
+                help_string += f"{name}:\t{function.__doc__}\n"
+            self.create_dialog(help_string)
 
     def normal_view(self, *args):  # pylint: disable=unused-argument
         """show chat"""
@@ -842,6 +842,9 @@ class Supervisor:
             self.current_buffer.change_msg("user")
         else:
             self.get_reply(self.current_buffer)
+
+    def queue_manager(self):
+        pass
 
     def watcher(self):
         while self.run:
@@ -1043,13 +1046,6 @@ class Supervisor:
                             self.columns - 4, self.buffer_last
                         )
                         hide_cursor = True
-                    case State.HELP:
-                        help_string = ""
-                        for name, function in self.commands.items():
-                            help_string += f"{name}:\t{function.__doc__}\n"
-                        box = make_text_box(
-                            help_string, self.columns - 4, self.buffer_last
-                        )
                     case State.MODELS:
                         box = make_text_box(
                             # json.dumps(self.models, indent=4),
