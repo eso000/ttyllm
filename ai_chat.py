@@ -1002,7 +1002,7 @@ class Supervisor:
                                 ]
                                 if len(possible_models) == 1:
                                     self.command += possible_models[0][
-                                        len(command_tokens) - 1 :
+                                        len(command_tokens[1])  :
                                     ]
                                     self.update_command()
                             case ":e" | "/e" | ":i" | "/i":
