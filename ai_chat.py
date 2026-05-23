@@ -129,11 +129,13 @@ class Buffer:
     TOOLS = False
 
     def __init__(self):
-        self.ai_name = "AI"
-        self.user_name = "You"
-        self.ai_color = "\033[35m"
-        self.user_color = "\033[36m"
-        self.normal_color = "\033[37m"
+        self.visual_data = {
+            "ai_name": "AI",
+            "user_name": "You",
+            "ai_color": "\033[35m",
+            "user_color": "\033[36m",
+            "normal_color": "\033[37m",
+        }
         self.cancel = False
         self.updated = False
         self.show_data = False
@@ -169,6 +171,51 @@ class Buffer:
         self.cond = threading.Condition()
         self.in_request = False
         self.add_msg("system")
+
+    @property
+    def ai_name(self):
+        return self.visual_data["ai_name"]
+
+    @property
+    def user_name(self):
+        return self.visual_data["user_name"]
+
+    @property
+    def ai_color(self):
+        return self.visual_data["ai_color"]
+
+    @property
+    def user_color(self):
+        return self.visual_data["user_color"]
+
+    @property
+    def normal_color(self):
+        return self.visual_data["normal_color"]
+
+    @ai_name.setter
+    def ai_name(self, new_name):
+        self.visual_data["ai_name"] = new_name
+        self.notify()
+
+    @user_name.setter
+    def user_name(self, new_name):
+        self.visual_data["user_name"] = new_name
+        self.notify()
+
+    @ai_color.setter
+    def ai_color(self, new_color):
+        self.visual_data["ai_color"] = self._process_color(new_color)
+        self.notify()
+
+    @user_color.setter
+    def user_color(self, new_color):
+        self.visual_data["user_color"] = self._process_color(new_color)
+        self.notify()
+
+    @normal_color.setter
+    def normal_color(self, new_color):
+        self.visual_data["normal_color"] = self._process_color(new_color)
+        self.notify()
 
     def empty(self):
         with self.cond:
@@ -261,7 +308,7 @@ class Buffer:
     def _process_color(self, value: str) -> str:
         pattern_8bit = re.compile("^8b:[0-9]$")
         pattern_256bit = re.compile("^256b:[0-9]{1,3}$")
-        pattern_rgb = re.compile("^rgb:[0-9]{1,3};[0-9]{1,3};[0-9]{1,3}$")
+        pattern_rgb = re.compile("^rgb:[1-9]{1,3};[0-9]{1,3};[0-9]{1,3}$")
         if pattern_8bit.match(value):
             return f"\033[3{value[-1]}m"
         if pattern_256bit.match(value):
@@ -287,6 +334,10 @@ class Buffer:
                 return True
             return False
 
+        if "visual" in data:
+            self.visual_data.update(data["visual"])
+        if "chat" in data:
+            data = data["chat"]
         if _check_dict(data, "model", str):
             return
         if _check_dict(data, "messages", list):
@@ -564,6 +615,7 @@ class Supervisor:
             "sys": self.change_system,
             "i": self.import_chat,
             "e": self.export_chat,
+            "v": self.visual,
         }
 
     @property
@@ -734,11 +786,41 @@ class Supervisor:
             return
         try:
             with open(args[0], "w", encoding="utf-8") as file:
-                json.dump(self.current_data, file, indent=4)
+                json.dump(
+                    {
+                        "visual": self.current_buffer.visual_data,
+                        "chat": self.current_data,
+                    },
+                    file,
+                    indent=4,
+                )
         except PermissionError:
             self.create_dialog(f"insufficient permissions for {args[0]}")
         except FileNotFoundError:
             self.create_dialog(f"File {args[0]} not found")
+
+    def visual(self, *args):
+        if len(args) == 0:
+            self.create_dialog(json.dumps(self.current_buffer.visual_data, indent=3))
+        elif len(args) == 1:
+            self.create_dialog("no data provided")
+        else:
+            try:
+                match args[0]:
+                    case "un":
+                        self.current_buffer.user_name = args[1]
+                    case "an":
+                        self.current_buffer.ai_name = args[1]
+                    case "uc":
+                        self.current_buffer.user_color = args[1]
+                    case "ac":
+                        self.current_buffer.ai_color = args[1]
+                    case "nc":
+                        self.current_buffer.normal_color = args[1]
+                    case _:
+                        self.create_dialog(f"comand {args[0]} not found")
+            except ColorCodeExeption:
+                self.create_dialog(f"invalid color code :{args[1]}")
 
     def process_command(self) -> bool:
         command = self.command.split(" ")
