@@ -170,6 +170,7 @@ class Buffer:
         self.tokens = -1
         self.cond = threading.Condition()
         self.in_request = False
+        self.queued = False
         self.add_msg("system")
 
     @property
@@ -562,6 +563,43 @@ class State(Enum):
     DIALOG = 5
 
 
+class Queue:
+    def __init__(self):
+        self.cond = threading.Condition()
+        self.qu = []
+
+    def scheduel(self, chat):
+        if chat.queued or chat.in_request:
+            return
+        with self.cond:
+            self.qu.append(chat)
+            chat.queued = True
+            self.cond.notify()
+            chat.notify()
+
+    def descheduel(self, chat):
+        with self.cond:
+            for index, scheduled_chat in enumerate(self.qu):
+                if scheduled_chat == chat:
+                    chat.queued = False
+                    self.qu.pop(index)
+                    chat.notify()
+                    return
+
+    @property
+    def next(self):
+        with self.cond:
+            chat = self.qu.pop()
+            chat.queued = False
+            chat.notify()
+            return chat
+
+    @property
+    def has_scheduled(self):
+        with self.cond:
+            return len(self.qu) != 0
+
+
 class Supervisor:
     def __init__(self) -> None:
         self.buffers = [Buffer()]
@@ -576,6 +614,8 @@ class Supervisor:
         self.buffer_last = -1
         self.buffer_lines = -1
         self.buffer_changed = False
+
+        self.queue = Queue()
 
         size = shutil.get_terminal_size()
         self.columns = size.columns
@@ -633,6 +673,7 @@ class Supervisor:
 
     def handle_sigint(self):
         self.current_buffer.cancel = True
+        self.queue.descheduel(self.current_buffer)
 
     def handle_sigwinch(self, signum, frame):
         size = shutil.get_terminal_size()
@@ -705,7 +746,7 @@ class Supervisor:
     def redo(self, *args):  # pylint: disable=unused-argument
         """regenerate last message"""
         self.current_buffer.del_msg(2)
-        self.get_reply(self.current_buffer)
+        self.queue.scheduel(self.current_buffer)
 
     def start_over(self, *args):  # pylint: disable=unused-argument
         """reset current buffer"""
@@ -841,10 +882,17 @@ class Supervisor:
         if self.current_data["messages"][-1]["role"] != "user":
             self.current_buffer.change_msg("user")
         else:
-            self.get_reply(self.current_buffer)
+            self.queue.scheduel(self.current_buffer)
 
     def queue_manager(self):
-        pass
+        while self.run:
+            with self.queue.cond:
+                while not self.queue.has_scheduled and self.run:
+                    self.queue.cond.wait()
+                if not self.run:
+                    return
+                chat = self.queue.next
+            self.get_reply(chat)
 
     def watcher(self):
         while self.run:
@@ -899,7 +947,8 @@ class Supervisor:
             fit_text_to_box(
                 f"    model: {self.current_data['model']}"
                 f" -- tokens: {self.current_buffer.tokens}"
-                f"   buffer: {self.current_buffer_id + 1} of {len(self.buffers)}",
+                f"   buffer: {self.current_buffer_id + 1} of {len(self.buffers)}"
+                f" {'in_request' if self.current_buffer.in_request else "queued" if self.current_buffer.queued else ""} ",
                 self.columns,
                 1,
                 self.lines,
@@ -934,13 +983,17 @@ class Supervisor:
                     continue
                 if ord(ch) == 3:
                     self.handle_sigint()
+                    input_length = len(self.current_data["messages"][-1]["content"])
                 if not ch or ch == "\r" or ch == "\n":
                     if is_command:
                         if self.command in ("/q", ":q"):
                             self.run = False
-                            self.handle_sigint()
+                            for buffer in self.buffers:
+                                buffer.cancel = True
                             with self.current_buffer.cond:
                                 self.current_buffer.cond.notify()
+                            with self.queue.cond:
+                                self.queue.cond.notify()
                         is_command = False
                         self.update_command()
                         self.input_done = True
@@ -975,7 +1028,11 @@ class Supervisor:
                         is_command = True
                         self.command = ch
                         self.update_command()
-                    elif not self.current_buffer.in_request and not is_command:
+                    elif (
+                        not self.current_buffer.in_request
+                        and not self.current_buffer.queued
+                        and not is_command
+                    ):
                         if self.state == State.DIALOG:
                             self.state = State.NORMAL
                             self.dialog_reply = ch
@@ -984,9 +1041,11 @@ class Supervisor:
                             self.buffer_last = -1
                             self.state = State.NORMAL
                             self.current_buffer.add_open(ch)
-                    else:
+                    elif len(self.command) > 0:
                         self.command += ch
                         self.update_command()
+                    else:
+                        continue
                     input_length += 1
                 if ord(ch) == 9:
                     if is_command:
@@ -1002,7 +1061,7 @@ class Supervisor:
                                 ]
                                 if len(possible_models) == 1:
                                     self.command += possible_models[0][
-                                        len(command_tokens[1])  :
+                                        len(command_tokens[1]) :
                                     ]
                                     self.update_command()
                             case ":e" | "/e" | ":i" | "/i":
@@ -1080,6 +1139,7 @@ class Supervisor:
             threading.Thread(target=self.get_input),
             threading.Thread(target=self.update_buffer),
             threading.Thread(target=self.watcher),
+            threading.Thread(target=self.queue_manager),
         ]
 
         for thread in threads:
