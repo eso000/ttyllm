@@ -103,6 +103,9 @@ class Requester:
         call = False
         chat.cancel = False
         chat.in_request = True
+        r, _, _ = select.select([chat.pipe[0]], [], [], 0.5)
+        if r:
+            os.read(chat.pipe[0], 2)
 
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.connect((self.host, self.port))
