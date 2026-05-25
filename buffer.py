@@ -1,0 +1,311 @@
+import re
+import os
+import json
+import threading
+
+from box_drawing import TextBox, text_to_lines, make_text_box
+
+
+class ColorCodeExeption(Exception):
+    pass
+
+
+class Buffer:
+    TOOLS = False
+
+    def __init__(self):
+        self.visual_data = {
+            "ai_name": "AI",
+            "user_name": "You",
+            "ai_color": "\033[35m",
+            "user_color": "\033[36m",
+            "normal_color": "\033[37m",
+        }
+        self.cancel = False
+        self.updated = False
+        self.pipe = os.pipe()
+        self.show_data = False
+        self.show_system = False
+        self.chat_data = {
+            "model": "llama3.2",  # mistral-nemo",
+            "stream": True,
+            "think": False,
+            "messages": [],
+        }
+        if self.TOOLS:
+            self.chat_data["tools"] = [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "get_temperature",
+                        "description": "Get the current temperature for a city",
+                        "parameters": {
+                            "type": "object",
+                            "required": ["city"],
+                            "properties": {
+                                "city": {
+                                    "type": "string",
+                                    "description": "The name of the city",
+                                }
+                            },
+                        },
+                    },
+                }
+            ]
+
+        self.tokens = -1
+        self.cond = threading.Condition()
+        self.in_request = False
+        self.queued = False
+        self.add_msg("system")
+
+    @property
+    def ai_name(self):
+        return self.visual_data["ai_name"]
+
+    @property
+    def user_name(self):
+        return self.visual_data["user_name"]
+
+    @property
+    def ai_color(self):
+        return self.visual_data["ai_color"]
+
+    @property
+    def user_color(self):
+        return self.visual_data["user_color"]
+
+    @property
+    def normal_color(self):
+        return self.visual_data["normal_color"]
+
+    @ai_name.setter
+    def ai_name(self, new_name):
+        self.visual_data["ai_name"] = new_name
+        self.notify()
+
+    @user_name.setter
+    def user_name(self, new_name):
+        self.visual_data["user_name"] = new_name
+        self.notify()
+
+    @ai_color.setter
+    def ai_color(self, new_color):
+        self.visual_data["ai_color"] = self._process_color(new_color)
+        self.notify()
+
+    @user_color.setter
+    def user_color(self, new_color):
+        self.visual_data["user_color"] = self._process_color(new_color)
+        self.notify()
+
+    @normal_color.setter
+    def normal_color(self, new_color):
+        self.visual_data["normal_color"] = self._process_color(new_color)
+        self.notify()
+
+    def cancel_request(self):
+        self.cancel = True
+        os.write(self.pipe[1], b"1")
+
+    def empty(self):
+        with self.cond:
+            self.chat_data["messages"] = []
+            self.add_msg("system")
+            self.updated = True
+            self.cond.notify()
+
+    def del_msg(self, number=1):
+        with self.cond:
+            for _ in range(min(number, len(self.chat_data["messages"]))):
+                curent_role = self.chat_data["messages"][-1]["role"]
+                initial_role = self.chat_data["messages"][-1]["role"]
+                while curent_role in (initial_role, "tool"):
+                    self.chat_data["messages"].pop()
+                    if len(self.chat_data["messages"]) == 0:
+                        break
+                    curent_role = self.chat_data["messages"][-1]["role"]
+
+            self.updated = True
+            self.cond.notify()
+
+    def add_msg(self, role):
+        with self.cond:
+            self.chat_data["messages"].append({"role": role, "content": ""})
+            self.updated = True
+            self.cond.notify()
+
+    def change_msg(self, role):
+        with self.cond:
+            if self.in_request:
+                return
+            if self.chat_data["messages"][-1]["content"] == "":
+                self.chat_data["messages"][-1]["role"] = role
+            else:
+                self.chat_data["messages"].append({"role": role, "content": ""})
+            self.updated = True
+            self.cond.notify()
+
+    def add_open(self, ch):
+        with self.cond:
+            if self.in_request:
+                return
+            if self.chat_data["messages"][-1].get("role") in (
+                "user",
+                "system",
+                "assistant",
+            ):
+                self.chat_data["messages"][-1]["content"] += ch
+                self.show_data = False
+                self.show_system = False
+                self.updated = True
+                self.cond.notify()
+
+    def del_open(self):
+        with self.cond:
+            if self.in_request:
+                return
+            if self.chat_data["messages"][-1].get("role") in (
+                "user",
+                "system",
+                "assistant",
+            ):
+                self.chat_data["messages"][-1]["content"] = self.chat_data["messages"][
+                    -1
+                ]["content"][:-1]
+            self.updated = True
+            self.cond.notify()
+
+    def clear_msg(self):
+        with self.cond:
+            self.chat_data["messages"][-1]["content"] = ""
+            self.updated = True
+            self.cond.notify()
+
+    def add_ai_tool(self, tool_calls):
+        with self.cond:
+            if self.in_request:
+                if self.chat_data["messages"][-1].get("role") == "assistant":
+                    self.chat_data["messages"][-1]["tool_calls"] = tool_calls
+
+    def add_ai(self, ch):
+        with self.cond:
+            if self.in_request:
+                if self.chat_data["messages"][-1].get("role") == "assistant":
+                    self.chat_data["messages"][-1]["content"] += ch
+                    self.updated = True
+                    self.cond.notify()
+
+    def _process_color(self, value: str) -> str:
+        pattern_8bit = re.compile("^8b:[0-9]$")
+        pattern_256bit = re.compile("^256b:[0-9]{1,3}$")
+        pattern_rgb = re.compile("^rgb:[1-9]{1,3};[0-9]{1,3};[0-9]{1,3}$")
+        if pattern_8bit.match(value):
+            return f"\033[3{value[-1]}m"
+        if pattern_256bit.match(value):
+            return f"\033[38;5;{value[5:]}m"
+        if pattern_rgb.match(value):
+            return f"\033[38;2;{value[4:]}m"
+        raise ColorCodeExeption(f"{value} does not fit acceptable formats")
+
+    def set_normal_color(self, value: str) -> None:
+        self.normal_color = self._process_color(value)
+
+    def set_ai_color(self, value: str) -> None:
+        self.ai_color = self._process_color(value)
+
+    def set_user_color(self, value: str) -> None:
+        self.user_color = self._process_color(value)
+
+    def set_data(self, data):
+        def _check_dict(_dict, _key, _instance):
+            if _key not in _dict:
+                return True
+            if not isinstance(_dict[_key], _instance):
+                return True
+            return False
+
+        if "visual" in data:
+            self.visual_data.update(data["visual"])
+        if "chat" in data:
+            data = data["chat"]
+        if _check_dict(data, "model", str):
+            return
+        if _check_dict(data, "messages", list):
+            return
+        for msg in data["messages"]:
+            if _check_dict(msg, "role", str):
+                return
+            if not _check_dict(msg, "content", str) and not _check_dict(
+                msg, "tool_calls", list
+            ):
+                return
+        with self.cond:
+            self.chat_data = data
+            self.updated = True
+            self.cond.notify()
+
+    def notify(self):
+        with self.cond:
+            self.updated = True
+            self.cond.notify()
+
+    def get_text_box_system(self, width, last=-1) -> str:
+        result = TextBox()
+        res = []
+        res += [f"{self.normal_color}system:"]
+        msg_ = self.chat_data["messages"][0]
+        if msg_["content"] == "":
+            res += [""]
+        else:
+            res_lines = msg_["content"].split("\n")
+            for line in res_lines:
+                if line == "":
+                    res.append("")
+                else:
+                    res += [
+                        f"{self.normal_color}{line[i : i + width]}"
+                        for i in range(0, len(line), width)
+                    ]
+        result.last = last
+        result.lines = res
+        return result
+
+    def get_text_box_data(self, width, last=-1) -> str:
+        return make_text_box(json.dumps(self.chat_data, indent=4), width, last=last)
+
+    def get_text_box(self, width, last=-1) -> str:
+        result = TextBox()
+        res = []
+        if (
+            len(self.chat_data["messages"]) == 1
+            and self.chat_data["messages"][0]["role"] == "system"
+        ):
+            res += [f"{self.normal_color}system:"]
+            msg_ = self.chat_data["messages"][0]
+            res += text_to_lines(msg_["content"], width, self.normal_color)
+            result.last = last
+            result.lines = res
+            return result
+
+        for msg_ in self.chat_data["messages"]:
+            if msg_["role"] in ("system", "tool") or "tool_calls" in msg_:
+                continue
+            color = self.user_color if msg_["role"] == "user" else self.ai_color
+            name = self.user_name if msg_["role"] == "user" else self.ai_name
+            res += [f"{self.normal_color}{name}:"]
+            res += text_to_lines(msg_["content"], width, color)
+        result.last = last
+        result.lines = res
+        return result
+
+    def get_string(self) -> str:
+        res = ""
+        for msg_ in self.chat_data["messages"]:
+            if msg_["role"] == "user":
+                res += f"{self.normal_color}{self.user_name}\n"
+                res += f"{self.user_color}{msg_["content"]}\n"
+            if msg_["role"] == "assistant":
+                res += f"{self.normal_color}{self.ai_name}\n"
+                res += f"{self.ai_color}{msg_["content"]}\n"
+        return res

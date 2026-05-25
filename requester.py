@@ -1,0 +1,150 @@
+import socket
+import os
+import select
+import json
+
+from buffer import Buffer
+
+
+class Requester:
+    def __init__(self, host="127.0.0.1", port=11434):
+        self.max_recv = 1024
+        self.host = host
+        self.port = port
+
+    def set_endpoint(self, endpoint) -> None:
+        host, port = endpoint
+        self.host = host
+        self.port = port
+
+    def make_post(self, d) -> str:
+        body = json.dumps(d)
+        headers = [
+            "POST /api/chat HTTP/1.1",
+            f"HOST: {self.host}",
+            "Content-Type: application/json",
+            f"Content-Length: {len(body)}",
+        ]
+
+        request = "\r\n".join(headers) + "\r\n\r\n" + body
+
+        return request
+
+    def _get_header(self, socket_, read_fd=None):
+        r, _, _ = select.select([x for x in [socket_, read_fd] if x], [], [])
+        if read_fd in r:
+            os.read(read_fd, 2)
+            return None
+        reply = socket_.recv(self.max_recv)
+        while b"\r\n\r\n" not in reply:
+            reply += socket_.recv(self.max_recv)
+        raw = reply.decode().split("\r\n\r\n")
+        if len(raw) < 2:
+            raw.append("")
+        return raw
+
+    def _get_all(self, final, size, socket_):
+        while len(final) < size:
+            final += socket_.recv(min(self.max_recv, size - len(final)))
+        return final
+
+    def _handle_json(self, socket_, existing):
+        if "Transfer-Encoding: chunked" in existing[0]:
+            body = existing[1].encode()
+            while b"\r\n0\r\n\r\n" not in body:
+                body += socket_.recv(self.max_recv)
+            ret = json.loads(body.decode().split("\r\n")[1])
+        else:
+            length = existing[0][existing[0].find("Content-Length: ") :]
+            length = length[: max(len(length), length.find("\n"))]
+            size = int(length[15::])
+            final = self._get_all(existing[1].encode(), size, socket_)
+            ret = json.loads(final.decode())
+        socket_.close()
+        return ret
+
+    def get_models(self):
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.connect((self.host, self.port))
+        headers = [
+            "GET /api/tags HTTP/1.1",
+            f"HOST: {self.host}",
+        ]
+
+        request = "\r\n".join(headers) + "\r\n\r\n"
+        s.send(request.encode())
+
+        raw = self._get_header(s)
+
+        if "Content-Type: application/json;" in raw[0]:
+            return self._handle_json(s, raw)
+        return {}
+
+    def _handle_msg(self, chat: Buffer, body) -> (bool, bool):
+        call = False
+        msg = body["message"]["content"]
+        chat.add_ai(msg)
+        if body["done"]:
+            chat.tokens = body["prompt_eval_count"] + body["eval_count"]
+        if "tool_calls" in body["message"]:
+            call = True
+            chat.add_ai_tool(body["message"]["tool_calls"])
+            for tool_call in body["message"]["tool_calls"]:
+                chat.chat_data["messages"].append(
+                    {
+                        "role": "tool",
+                        "tool_name": tool_call["function"]["name"],
+                        "content": "42 degree Celsius",
+                    }
+                )
+        return (body["done"], call)
+
+    def get_reply(self, chat: Buffer, wrapped=False) -> None:
+        call = False
+        chat.cancel = False
+        chat.in_request = True
+
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.connect((self.host, self.port))
+        s.send(self.make_post(chat.chat_data).encode())
+
+        chat.add_msg("assistant")
+        raw = self._get_header(s, chat.pipe[0])
+        if raw is None:
+            chat.in_request = False
+            s.close()
+            chat.notify()
+            return None
+
+        if "HTTP/1.1 200 OK" not in raw[0]:
+            chat.in_request = False
+            s.close()
+            return "\n".join(raw)
+        if "Content-Type: application/x-ndjson" in raw[0]:
+            body = raw[1].splitlines()
+            done = False
+            while not done and not chat.cancel:
+                body = [x for x in body if x != ""]
+                if len(body) == 0:
+                    body = s.recv(self.max_recv).decode().splitlines()
+                size = int(body[0], 16)
+                if size != len(body[1].encode()) + 1:
+                    final = body[1].encode()
+                    final = self._get_all(final, size + 2, s)
+                    body[1] = final.decode()
+                done, call = self._handle_msg(chat, json.loads(body[1]))
+                if call:
+                    break
+                body.pop(0)
+                body.pop(0)
+
+        if "Content-Type: application/json;" in raw[1]:
+            body = self._handle_json(s, raw)
+            _, call = self._handle_msg(chat, body)
+        s.close()
+        chat.in_request = False
+        if call:
+            self.get_reply(chat, wrapped=True)
+        if not wrapped:
+            chat.add_msg("user")
+        return None
