@@ -47,7 +47,7 @@ class Queue:
     @property
     def next(self):
         with self.cond:
-            chat = self.qu.pop()
+            chat = self.qu.pop(0)
             chat.queued = False
             chat.notify()
             return chat

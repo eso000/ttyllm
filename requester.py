@@ -116,6 +116,7 @@ class Requester:
         if raw is None:
             chat.in_request = False
             s.close()
+            chat.add_msg("user")
             chat.notify()
             return None
 
