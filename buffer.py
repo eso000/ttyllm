@@ -10,7 +10,7 @@ class ColorCodeExeption(Exception):
     pass
 
 
-class Buffer:
+class Buffer:  # pylint: disable=R0902, R0904
     TOOLS = False
 
     def __init__(self):
@@ -21,11 +21,15 @@ class Buffer:
             "user_color": "\033[36m",
             "normal_color": "\033[37m",
         }
+        self.in_request = False
+        self.queued = False
         self.cancel = False
         self.updated = False
         self.pipe = os.pipe()
-        self.show_data = False
-        self.show_system = False
+
+        self.tokens = -1
+        self.cond = threading.Condition()
+
         self.chat_data = {
             "model": "llama3.2",  # mistral-nemo",
             "stream": True,
@@ -53,10 +57,6 @@ class Buffer:
                 }
             ]
 
-        self.tokens = -1
-        self.cond = threading.Condition()
-        self.in_request = False
-        self.queued = False
         self.add_msg("system")
 
     @property
@@ -156,8 +156,6 @@ class Buffer:
                 "assistant",
             ):
                 self.chat_data["messages"][-1]["content"] += ch
-                self.show_data = False
-                self.show_system = False
                 self.updated = True
                 self.cond.notify()
 
