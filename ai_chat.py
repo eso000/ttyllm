@@ -7,6 +7,8 @@ import threading
 import dataclasses
 import signal
 import shutil
+import os
+import select
 from glob import glob
 from enum import Enum
 
@@ -138,6 +140,7 @@ class Buffer:
         }
         self.cancel = False
         self.updated = False
+        self.pipe = os.pipe()
         self.show_data = False
         self.show_system = False
         self.chat_data = {
@@ -217,6 +220,10 @@ class Buffer:
     def normal_color(self, new_color):
         self.visual_data["normal_color"] = self._process_color(new_color)
         self.notify()
+
+    def cancel_request(self):
+        self.cancel = True
+        os.write(self.pipe[1], b"1")
 
     def empty(self):
         with self.cond:
@@ -445,7 +452,11 @@ class Requester:
 
         return request
 
-    def _get_header(self, socket_):
+    def _get_header(self, socket_, read_fd=None):
+        r, _, _ = select.select([x for x in [socket_, read_fd] if x], [], [])
+        if read_fd in r:
+            os.read(read_fd, 2)
+            return None
         reply = socket_.recv(self.max_recv)
         while b"\r\n\r\n" not in reply:
             reply += socket_.recv(self.max_recv)
@@ -520,9 +531,16 @@ class Requester:
         s.send(self.make_post(chat.chat_data).encode())
 
         chat.add_msg("assistant")
-        raw = self._get_header(s)
+        raw = self._get_header(s, chat.pipe[0])
+        if raw is None:
+            chat.in_request = False
+            s.close()
+            chat.notify()
+            return
+
         if "HTTP/1.1 200 OK" not in raw[0]:
             chat.in_request = False
+            s.close()
             return "\n".join(raw)
         if "Content-Type: application/x-ndjson" in raw[0]:
             body = raw[1].splitlines()
@@ -672,7 +690,7 @@ class Supervisor:
         self.current_buffer.notify()
 
     def handle_sigint(self):
-        self.current_buffer.cancel = True
+        self.current_buffer.cancel_request()
         self.queue.descheduel(self.current_buffer)
 
     def handle_sigwinch(self, signum, frame):
@@ -982,14 +1000,17 @@ class Supervisor:
                     self.handle_escape_sequence()
                     continue
                 if ord(ch) == 3:
+                    if self.current_buffer.queued:
+                        input_length = len(self.current_data["messages"][-1]["content"])
+                    else:
+                        input_length = 0
                     self.handle_sigint()
-                    input_length = len(self.current_data["messages"][-1]["content"])
                 if not ch or ch == "\r" or ch == "\n":
                     if is_command:
                         if self.command in ("/q", ":q"):
                             self.run = False
                             for buffer in self.buffers:
-                                buffer.cancel = True
+                                buffer.cancel_request()
                             with self.current_buffer.cond:
                                 self.current_buffer.cond.notify()
                             with self.queue.cond:
@@ -1063,6 +1084,9 @@ class Supervisor:
                                     self.command += possible_models[0][
                                         len(command_tokens[1]) :
                                     ]
+                                    input_length += len(
+                                        possible_models[0][len(command_tokens[1]) :]
+                                    )
                                     self.update_command()
                             case ":e" | "/e" | ":i" | "/i":
                                 possible_completions = glob(f"{command_tokens[1]}*")
