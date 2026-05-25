@@ -133,7 +133,7 @@ class Supervisor:
         self.current_buffer.cancel_request()
         self.queue.descheduel(self.current_buffer)
 
-    def handle_sigwinch(self, signum, frame):
+    def handle_sigwinch(self, signum, frame):  # pylint: disable=unused-argument
         size = shutil.get_terminal_size()
         self.columns = size.columns
         self.lines = size.lines
@@ -406,7 +406,8 @@ class Supervisor:
                 f"    model: {self.current_data['model']}"
                 f" -- tokens: {self.current_buffer.tokens}"
                 f"   buffer: {self.current_buffer_id + 1} of {len(self.buffers)}"
-                f" {'in_request' if self.current_buffer.in_request else "queued" if self.current_buffer.queued else ""} ",
+                f" {'in_request' if self.current_buffer.in_request else
+                    "queued" if self.current_buffer.queued else ""} ",
                 self.columns,
                 1,
                 self.lines,
@@ -421,16 +422,31 @@ class Supervisor:
             )
 
     def get_input(self):
-        input_length = 0
-        is_command = False
         while self.run:
             ch = sys.stdin.read(1)
             with self.input_cond:
+                if ord(ch) == 2:
+                    self.create_buffer()
+                if ord(ch) == 4:
+                    self.buffer_delete()
+                if ord(ch) == 14:
+                    self.buffer_next()
+                if ord(ch) == 16:
+                    self.buffer_previous()
+                if ord(ch) == 18:
+                    self.redo()
+                if ord(ch) == 5:
+                    self.undo()
+                if ord(ch) == 1:
+                    if self.command == "":
+                        self.command = "/"
+                    else:
+                        self.command = ""
+                    self.update_command()
+
                 if ord(ch) == 21:
-                    input_length = 0
                     if self.command:
                         self.command = ""
-                        is_command = False
                         with self.current_buffer.cond:
                             self.current_buffer.updated = True
                             self.current_buffer.cond.notify()
@@ -440,13 +456,9 @@ class Supervisor:
                     self.handle_escape_sequence()
                     continue
                 if ord(ch) == 3:
-                    if self.current_buffer.queued:
-                        input_length = len(self.current_data["messages"][-1]["content"])
-                    else:
-                        input_length = 0
                     self.handle_sigint()
                 if not ch or ch == "\r" or ch == "\n":
-                    if is_command:
+                    if self.command != "":
                         if self.command in ("/q", ":q"):
                             self.run = False
                             for buffer in self.buffers:
@@ -455,7 +467,6 @@ class Supervisor:
                                 self.current_buffer.cond.notify()
                             with self.queue.cond:
                                 self.queue.cond.notify()
-                        is_command = False
                         self.update_command()
                         self.input_done = True
                         self.input_cond.notify()
@@ -466,16 +477,11 @@ class Supervisor:
                         else:
                             self.state = State.NORMAL
                             self.current_buffer.notify()
-                    input_length = 0
                 if ord(ch) == 127:
-                    if input_length <= 0:
-                        continue
-                    input_length -= 1
-                    if is_command:
-                        self.command = self.command[0:-1]
+                    if self.command != "":
+                        self.command = self.command[:-1]
                         self.update_command()
-                        if input_length == 0:
-                            is_command = False
+                        if self.command == "":
                             with self.current_buffer.cond:
                                 self.current_buffer.updated = True
                                 self.current_buffer.cond.notify()
@@ -485,14 +491,18 @@ class Supervisor:
                         self.current_buffer.del_open()
                     continue
                 if 32 <= ord(ch) <= 126:
-                    if input_length == 0 and ch in ("/", ":"):
-                        is_command = True
+                    if len(
+                        self.current_data["messages"][-1]["content"]
+                    ) == 0 and ch in (
+                        "/",
+                        ":",
+                    ):
                         self.command = ch
                         self.update_command()
                     elif (
                         not self.current_buffer.in_request
                         and not self.current_buffer.queued
-                        and not is_command
+                        and not self.command != ""
                     ):
                         if self.state == State.DIALOG:
                             self.state = State.NORMAL
@@ -507,9 +517,8 @@ class Supervisor:
                         self.update_command()
                     else:
                         continue
-                    input_length += 1
                 if ord(ch) == 9:
-                    if is_command:
+                    if self.command != "":
                         command_tokens = self.command.split(" ")
                         if len(command_tokens) < 2:
                             continue
@@ -524,9 +533,6 @@ class Supervisor:
                                     self.command += possible_models[0][
                                         len(command_tokens[1]) :
                                     ]
-                                    input_length += len(
-                                        possible_models[0][len(command_tokens[1]) :]
-                                    )
                                     self.update_command()
                             case ":e" | "/e" | ":i" | "/i":
                                 possible_completions = glob(f"{command_tokens[1]}*")
