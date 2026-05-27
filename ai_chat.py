@@ -200,6 +200,8 @@ class Supervisor:
         """creates new buffer from current"""
         new = Buffer()
         new.chat_data = json.loads(json.dumps(self.current_data))
+        new.visual_data = json.loads(json.dumps(self.current_buffer.visual_data))
+        new.tokens = self.current_buffer.tokens
         self.buffers.append(new)
         self.change_buffer(len(self.buffers) - 1)
 
@@ -501,12 +503,17 @@ class Supervisor:
                     continue
                 if 32 <= ord(ch) <= 126:
                     if (
-                        len(self.current_data["messages"][-1]["content"]) == 0
-                        or self.current_buffer.queued
-                        or self.current_buffer.in_request
-                    ) and ch in (
-                        "/",
-                        ":",
+                        (
+                            len(self.current_data["messages"][-1]["content"]) == 0
+                            or self.current_buffer.queued
+                            or self.current_buffer.in_request
+                        )
+                        and self.command == ""
+                        and ch
+                        in (
+                            "/",
+                            ":",
+                        )
                     ):
                         self.command = ch
                         self.update_command()
