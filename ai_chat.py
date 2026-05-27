@@ -432,7 +432,7 @@ class Supervisor:
         while self.run:
             ch = os.read(fd, 1).decode()
             with self.input_cond:
-                if ord(ch) == 20:
+                if ord(ch) == 19:
                     self.split()
                 if ord(ch) == 2:
                     self.create_buffer()
