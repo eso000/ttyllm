@@ -4,6 +4,8 @@ import termios
 import threading
 import signal
 import shutil
+import select
+import os
 from glob import glob
 from enum import Enum
 
@@ -366,10 +368,14 @@ class Supervisor:
                 self.handle_new_message()
 
     def handle_escape_sequence(self):
+        fd = sys.stdin.fileno()
         buffer = ""
         ch = 27
+        r, _, _ = select.select([fd], [], [], 0.0)
+        if len(r) == 0:
+            return
         while ch not in ("A", "B", "C", "D", "~"):
-            ch = sys.stdin.read(1)
+            ch = os.read(fd, 1).decode()
             if ord(ch) == 27:
                 return
             buffer += ch
@@ -422,9 +428,12 @@ class Supervisor:
             )
 
     def get_input(self):
+        fd = sys.stdin.fileno()
         while self.run:
-            ch = sys.stdin.read(1)
+            ch = os.read(fd, 1).decode()
             with self.input_cond:
+                if ord(ch) == 20:
+                    self.split()
                 if ord(ch) == 2:
                     self.create_buffer()
                 if ord(ch) == 4:
@@ -437,7 +446,7 @@ class Supervisor:
                     self.redo()
                 if ord(ch) == 5:
                     self.undo()
-                if ord(ch) == 1:
+                if ord(ch) == 17:
                     if self.command == "":
                         self.command = "/"
                     else:
@@ -491,9 +500,11 @@ class Supervisor:
                         self.current_buffer.del_open()
                     continue
                 if 32 <= ord(ch) <= 126:
-                    if len(
-                        self.current_data["messages"][-1]["content"]
-                    ) == 0 and ch in (
+                    if (
+                        len(self.current_data["messages"][-1]["content"]) == 0
+                        or self.current_buffer.queued
+                        or self.current_buffer.in_request
+                    ) and ch in (
                         "/",
                         ":",
                     ):
@@ -602,6 +613,7 @@ class Supervisor:
         fd = sys.stdin.fileno()
         old = termios.tcgetattr(fd)
         new = termios.tcgetattr(fd)
+        new[0] &= ~(termios.IXON)
         new[3] &= ~(termios.ICANON | termios.ECHO | termios.ISIG)
         termios.tcsetattr(fd, termios.TCSADRAIN, new)
 
