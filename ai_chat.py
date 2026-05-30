@@ -429,6 +429,34 @@ class Supervisor:
                 self.command, self.columns, 1, self.lines, 1, "\033[32m", "\033[41m"
             )
 
+    def _auto_complete(self):
+        if self.command != "":
+            command_tokens = self.command.split(" ")
+            if len(command_tokens) < 2:
+                return
+            possible_completions = []
+            match command_tokens[0]:
+                case ":sm" | "/sm":
+                    possible_completions = [
+                        x for x in self.models_list if x.startswith(command_tokens[1])
+                    ]
+                case ":e" | "/e" | ":i" | "/i":
+                    possible_completions = glob(f"{command_tokens[1]}*")
+            if len(possible_completions) == 0:
+                return
+            if len(possible_completions) == 1:
+                self.command += possible_completions[0][len(command_tokens[1]) :]
+                self.update_command()
+                return
+            common_prefix = possible_completions[0]
+            for string in possible_completions:
+                while not string.startswith(common_prefix):
+                    common_prefix = common_prefix[:-1]
+                if common_prefix == "":
+                    return
+            self.command += common_prefix[len(command_tokens[1]) :]
+            self.update_command()
+
     def get_input(self):
         fd = sys.stdin.fileno()
         while self.run:
@@ -536,29 +564,7 @@ class Supervisor:
                     else:
                         continue
                 if ord(ch) == 9:
-                    if self.command != "":
-                        command_tokens = self.command.split(" ")
-                        if len(command_tokens) < 2:
-                            continue
-                        match command_tokens[0]:
-                            case ":sm" | "/sm":
-                                possible_models = [
-                                    x
-                                    for x in self.models_list
-                                    if x.startswith(command_tokens[1])
-                                ]
-                                if len(possible_models) == 1:
-                                    self.command += possible_models[0][
-                                        len(command_tokens[1]) :
-                                    ]
-                                    self.update_command()
-                            case ":e" | "/e" | ":i" | "/i":
-                                possible_completions = glob(f"{command_tokens[1]}*")
-                                if len(possible_completions) == 1:
-                                    self.command += possible_completions[0][
-                                        len(command_tokens[1]) :
-                                    ]
-                                    self.update_command()
+                    self._auto_complete()
 
     def update_buffer(self):
         while self.run:
