@@ -642,9 +642,3 @@ class Supervisor:
         print("\033[?25h", end="", flush=True)
         print("\033[?1049l", end="", flush=True)
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
-
-
-if __name__ == "__main__":
-    if "-t" in sys.argv:
-        Buffer.TOOLS = True
-    Supervisor().run_chat()
