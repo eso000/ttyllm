@@ -369,7 +369,7 @@ class Supervisor:
             else:
                 self.handle_new_message()
 
-    def handle_escape_sequence(self):
+    def _handle_escape_sequence(self):
         fd = sys.stdin.fileno()
         buffer = ""
         ch = 27
@@ -383,18 +383,14 @@ class Supervisor:
             buffer += ch
 
         if buffer == "[A" or buffer.startswith("OA"):
-            if self.command != "":
-                pass
-            else:
+            if self.command == "":
                 if self.buffer_last < 0:
                     self.buffer_last = self.buffer_lines - 1
                 else:
                     if self.buffer_last:
                         self.buffer_last -= 1
         if buffer == "[B" or buffer.startswith("OB"):
-            if self.command != "":
-                pass
-            else:
+            if self.command == "":
                 if 0 <= self.buffer_last < self.buffer_lines:
                     self.buffer_last += 1
                 else:
@@ -462,40 +458,54 @@ class Supervisor:
         while self.run:
             ch = os.read(fd, 1).decode()
             with self.input_cond:
-                if ord(ch) == 19:
-                    self.split()
-                if ord(ch) == 2:
-                    self.create_buffer()
-                if ord(ch) == 4:
-                    self.buffer_delete()
-                if ord(ch) == 14:
-                    self.buffer_next()
-                if ord(ch) == 16:
-                    self.buffer_previous()
-                if ord(ch) == 18:
-                    self.redo()
-                if ord(ch) == 5:
-                    self.undo()
-                if ord(ch) == 17:
-                    if self.command == "":
-                        self.command = "/"
-                    else:
-                        self.command = ""
-                    self.update_command()
+                match ord(ch):
+                    case 19:
+                        self.split()
+                    case 2:
+                        self.create_buffer()
+                    case 4:
+                        self.buffer_delete()
+                    case 14:
+                        self.buffer_next()
+                    case 16:
+                        self.buffer_previous()
+                    case 18:
+                        self.redo()
+                    case 5:
+                        self.undo()
+                    case 17:
+                        if self.command == "":
+                            self.command = "/"
+                        else:
+                            self.command = ""
+                        self.update_command()
+                    case 21:
+                        if self.command:
+                            self.command = ""
+                            self.current_buffer.notify()
+                        else:
+                            self.current_buffer.clear_msg()
+                    case 27:
+                        self._handle_escape_sequence()
+                        continue
+                    case 3:
+                        self.handle_sigint()
+                    case 127:
+                        if self.command != "":
+                            self.command = self.command[:-1]
+                            self.update_command()
+                            if self.command == "":
+                                with self.current_buffer.cond:
+                                    self.current_buffer.updated = True
+                                    self.current_buffer.cond.notify()
+                        else:
+                            self.buffer_last = -1
+                            self.state = State.NORMAL
+                            self.current_buffer.del_open()
+                        continue
+                    case 9:
+                        self._auto_complete()
 
-                if ord(ch) == 21:
-                    if self.command:
-                        self.command = ""
-                        with self.current_buffer.cond:
-                            self.current_buffer.updated = True
-                            self.current_buffer.cond.notify()
-                    else:
-                        self.current_buffer.clear_msg()
-                if ord(ch) == 27:
-                    self.handle_escape_sequence()
-                    continue
-                if ord(ch) == 3:
-                    self.handle_sigint()
                 if not ch or ch == "\r" or ch == "\n":
                     if self.command != "":
                         if self.command in ("/q", ":q"):
@@ -516,19 +526,6 @@ class Supervisor:
                         else:
                             self.state = State.NORMAL
                             self.current_buffer.notify()
-                if ord(ch) == 127:
-                    if self.command != "":
-                        self.command = self.command[:-1]
-                        self.update_command()
-                        if self.command == "":
-                            with self.current_buffer.cond:
-                                self.current_buffer.updated = True
-                                self.current_buffer.cond.notify()
-                    else:
-                        self.buffer_last = -1
-                        self.state = State.NORMAL
-                        self.current_buffer.del_open()
-                    continue
                 if 32 <= ord(ch) <= 126:
                     if (
                         (
@@ -563,8 +560,6 @@ class Supervisor:
                         self.update_command()
                     else:
                         continue
-                if ord(ch) == 9:
-                    self._auto_complete()
 
     def update_buffer(self):
         while self.run:
