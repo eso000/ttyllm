@@ -35,6 +35,7 @@ class Buffer:  # pylint: disable=R0902, R0904
             "stream": True,
             "think": False,
             "messages": [],
+            "options": {"top_k": 30, "top_p": 0.9, "temperature": 0.8},
         }
         if self.TOOLS:
             self.chat_data["tools"] = [

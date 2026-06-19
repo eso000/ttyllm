@@ -6,12 +6,14 @@ import signal
 import shutil
 import select
 import os
+import base64
 from glob import glob
 from enum import Enum
 
 from box_drawing import make_text_box, clean_screan, fit_text_to_box, fit_to_box
 from buffer import Buffer, ColorCodeExeption
 from requester import Requester
+from dialog import Dialog
 
 
 class State(Enum):
@@ -64,7 +66,8 @@ class Supervisor:
     def __init__(self) -> None:
         self.buffers = [Buffer()]
         self.current_buffer_id = 0
-        self.requester = Requester()
+        self.dialog = Dialog()
+        self.requester = Requester(dialog=self.dialog)
 
         self.run = True
 
@@ -92,8 +95,6 @@ class Supervisor:
                 f"\t {model["size"] // 1073741824:} GB"
                 f"\t{model["details"]["parameter_size"]}\n"
             )
-        self.dialog = ""
-        self.dialog_reply = ""
 
         self.commands = {
             "m": self.list_models,
@@ -116,6 +117,7 @@ class Supervisor:
             "i": self.import_chat,
             "e": self.export_chat,
             "v": self.visual,
+            "image": self.add_image,
         }
 
     @property
@@ -126,8 +128,9 @@ class Supervisor:
     def current_data(self):
         return self.current_buffer.chat_data
 
-    def create_dialog(self, message):
-        self.dialog = f"{message}\n\n[ENTER] Dismiss"
+    def create_dialog(self, message=None):
+        if message:
+            self.dialog.set_text(message)
         self.state = State.DIALOG
         self.current_buffer.notify()
 
@@ -144,9 +147,8 @@ class Supervisor:
         self.current_buffer.notify()
 
     def get_reply(self, buffer):
-        error = self.requester.get_reply(buffer)
-        if error:
-            self.create_dialog(error)
+        if self.requester.get_reply(buffer):
+            self.create_dialog()
 
     def change_buffer(self, new_id):
         old_buffer = self.current_buffer
@@ -158,6 +160,25 @@ class Supervisor:
             self.current_buffer.cond.notify()
 
     ############# internal commands
+    def add_image(self, *args):  # pylint: disable=unused-argument
+        """add image to message"""
+        if len(args) < 1:
+            return
+        if self.current_data["messages"][-1]["role"] != "user":
+            return
+
+        try:
+            with open(args[0], "rb") as file:
+                img = base64.b64encode(file.read()).decode("utf-8")
+                if "images" not in self.current_data["messages"][-1]:
+                    self.current_data["messages"][-1]["images"] = []
+                self.current_data["messages"][-1]["images"].append(img)
+
+        except PermissionError:
+            self.create_dialog(f"insufficient permissions for {args[0]}")
+        except FileNotFoundError:
+            self.create_dialog(f"File {args[0]} not found")
+
     def list_models(self, *args):  # pylint: disable=unused-argument
         """list all models"""
         with self.current_buffer.cond:
@@ -436,7 +457,7 @@ class Supervisor:
                     possible_completions = [
                         x for x in self.models_list if x.startswith(command_tokens[1])
                     ]
-                case ":e" | "/e" | ":i" | "/i":
+                case ":e" | "/e" | ":i" | "/i" | ":image" | "/image":
                     possible_completions = glob(f"{command_tokens[1]}*")
             if len(possible_completions) == 0:
                 return
@@ -450,6 +471,8 @@ class Supervisor:
                     common_prefix = common_prefix[:-1]
                 if common_prefix == "":
                     return
+            if os.path.isdir(common_prefix):
+                common_prefix += "/"
             self.command += common_prefix[len(command_tokens[1]) :]
             self.update_command()
 
@@ -457,6 +480,11 @@ class Supervisor:
         fd = sys.stdin.fileno()
         while self.run:
             ch = os.read(fd, 1).decode()
+            if self.state == State.DIALOG:
+                self.dialog.set_reply(ch)
+                self.state = State.NORMAL
+                self.current_buffer.notify()
+                continue
             with self.input_cond:
                 match ord(ch):
                     case 19:
@@ -603,7 +631,7 @@ class Supervisor:
                         )
                     case State.DIALOG:
                         box = make_text_box(
-                            self.dialog,
+                            self.dialog.get_text(),
                             self.columns - 4,
                             self.buffer_last,
                         )

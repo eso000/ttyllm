@@ -4,13 +4,15 @@ import select
 import json
 
 from buffer import Buffer
+from dialog import Dialog
 
 
 class Requester:
-    def __init__(self, host="127.0.0.1", port=11434):
+    def __init__(self, host="127.0.0.1", port=11434, dialog=None):
         self.max_recv = 1024
         self.host = host
         self.port = port
+        self.dialog = dialog
 
     def set_endpoint(self, endpoint) -> None:
         host, port = endpoint
@@ -99,7 +101,7 @@ class Requester:
                 )
         return (body["done"], call)
 
-    def get_reply(self, chat: Buffer, wrapped=False) -> None:
+    def get_reply(self, chat: Buffer, wrapped=False) -> bool:
         call = False
         chat.cancel = False
         chat.in_request = True
@@ -118,12 +120,13 @@ class Requester:
             s.close()
             chat.add_msg("user")
             chat.notify()
-            return None
+            return False
 
         if "HTTP/1.1 200 OK" not in raw[0]:
             chat.in_request = False
             s.close()
-            return "\n".join(raw)
+            self.dialog.set_text("\n".join(raw))
+            return True
         if "Content-Type: application/x-ndjson" in raw[0]:
             body = raw[1].splitlines()
             done = False
@@ -151,4 +154,4 @@ class Requester:
             self.get_reply(chat, wrapped=True)
         if not wrapped:
             chat.add_msg("user")
-        return None
+        return False
