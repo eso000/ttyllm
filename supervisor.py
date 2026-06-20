@@ -63,11 +63,14 @@ class Queue:
 
 
 class Supervisor:
-    def __init__(self) -> None:
+    def __init__(self, open_api=False) -> None:
+
+        self.open_api = open_api
+
         self.buffers = [Buffer()]
         self.current_buffer_id = 0
         self.dialog = Dialog()
-        self.requester = Requester(dialog=self.dialog)
+        self.requester = Requester(dialog=self.dialog, open_api=open_api)
 
         self.run = True
 
@@ -89,7 +92,7 @@ class Supervisor:
         self.models = self.requester.get_models()
         self.models_short = ""
         self.models_list = [x["name"] for x in self.models["models"]]
-        for model in self.models["models"]:
+        for model in self.models["models"]:  # TODO adjust for open api
             self.models_short += (
                 f"{model["name"]:<20}"
                 f"\t {model["size"] // 1073741824:} GB"
@@ -117,6 +120,7 @@ class Supervisor:
             "i": self.import_chat,
             "e": self.export_chat,
             "v": self.visual,
+            "o": self.options,
             "image": self.add_image,
         }
 
@@ -322,6 +326,24 @@ class Supervisor:
             self.create_dialog(f"insufficient permissions for {args[0]}")
         except FileNotFoundError:
             self.create_dialog(f"File {args[0]} not found")
+
+    def options(self, *args):
+        if len(args) == 0:
+            self.create_dialog(json.dumps(self.current_buffer.options, indent=3))
+        elif len(args) == 1:
+            self.create_dialog("no data provided")
+        else:
+            match args[0]:
+                case "k":
+                    self.current_buffer.top_k = float(args[1])
+                case "p":
+                    self.current_buffer.top_p = float(args[1])
+                case "t":
+                    self.current_buffer.temperature = int(args[1])
+                case "pen":
+                    self.current_buffer.repeat_penalty = float(args[1])
+                case _:
+                    self.create_dialog(f"comand {args[0]} not found")
 
     def visual(self, *args):
         if len(args) == 0:
