@@ -67,6 +67,19 @@ class Buffer:  # pylint: disable=R0902, R0904
         self.add_msg("system")
 
     @property
+    def openai_data(self):
+        return {
+            "model": self.chat_data["model"],
+            "stream": self.chat_data["stream"],
+            "think": self.chat_data["think"],
+            "messages": self.chat_data["messages"],
+            "top_k": self.top_k,
+            "top_p": self.top_k,
+            "temperature": self.temperature,
+            "frequency_penalty": self.repeat_penalty,
+        }
+
+    @property
     def ai_name(self):
         return self.visual_data["ai_name"]
 

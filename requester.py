@@ -125,7 +125,11 @@ class Requester:
 
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.connect((self.host, self.port))
-        s.send(self.make_post(chat.chat_data).encode())
+        s.send(
+            self.make_post(
+                chat.openai_data if self.open_api else chat.chat_data
+            ).encode()
+        )
 
         chat.add_msg("assistant")
         raw = self._get_header(s, chat.pipe[0])
