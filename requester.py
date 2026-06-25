@@ -61,8 +61,13 @@ class Requester:
                 body += socket_.recv(self.max_recv)
             ret = json.loads(body.decode().split("\r\n")[1])
         else:
-            length = existing[0][existing[0].find("Content-Length: ") :]
-            length = length[: max(len(length), length.find("\n"))]
+            if "Content-Length:" in existing[0]:
+                length = existing[0][existing[0].find("Content-Length: ") :]
+            else:
+                length = existing[0][existing[0].find("content-length: ") :]
+            _find_c = length.find("\n")
+            length = length[: len(length) if _find_c < 0 else _find_c]
+            print(length)
             size = int(length[15::])
             final = self._get_all(existing[1].encode(), size, socket_)
             ret = json.loads(final.decode())
@@ -73,7 +78,7 @@ class Requester:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.connect((self.host, self.port))
         headers = [
-            "GET /api/tags HTTP/1.1",
+            f"GET {"/v1/models" if self.open_api else "/api/tags"} HTTP/1.1",
             f"HOST: {self.host}",
         ]
 
@@ -82,7 +87,10 @@ class Requester:
 
         raw = self._get_header(s)
 
-        if "Content-Type: application/json;" in raw[0]:
+        if (
+            "Content-Type: application/json;" in raw[0]
+            or "content-type: application/jso" in raw[0]
+        ):
             return self._handle_json(s, raw)
         return {}
 
@@ -164,7 +172,10 @@ class Requester:
                 body.pop(0)
                 body.pop(0)
 
-        if "Content-Type: text/event-stream" in raw[0]:
+        if (
+            "Content-Type: text/event-stream" in raw[0]
+            or "content-type: text/event-stream" in raw[0]
+        ):
             body = raw[1].splitlines()
             done = False
             while not done and not chat.cancel:

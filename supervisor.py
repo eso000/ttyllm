@@ -91,13 +91,19 @@ class Supervisor:
 
         self.models = self.requester.get_models()
         self.models_short = ""
-        self.models_list = [x["name"] for x in self.models["models"]]
-        for model in self.models["models"]:  # TODO adjust for open api
-            self.models_short += (
-                f"{model["name"]:<20}"
-                f"\t {model["size"] // 1073741824:} GB"
-                f"\t{model["details"]["parameter_size"]}\n"
-            )
+        print(self.models)
+        if "data" in self.models:
+            self.models_list = [x["id"] for x in self.models["data"]]
+            for model in self.models_list:
+                self.models_short += f"{model}\n"
+        else:
+            self.models_list = [x["name"] for x in self.models["models"]]
+            for model in self.models["models"]:
+                self.models_short += (
+                    f"{model["name"]:<20}"
+                    f"\t {model["size"] // 1073741824:} GB"
+                    f"\t{model["details"]["parameter_size"]}\n"
+                )
 
         self.commands = {
             "m": self.list_models,

@@ -40,7 +40,7 @@ class Buffer:  # pylint: disable=R0902, R0904
                 "top_k": 30,
                 "top_p": 0.9,
                 "temperature": 0.8,
-                "repeat_penalty": 2.1,
+                "repeat_penalty": 1.1,
             },
         }
         if self.TOOLS:
@@ -74,7 +74,7 @@ class Buffer:  # pylint: disable=R0902, R0904
             "think": self.chat_data["think"],
             "messages": self.chat_data["messages"],
             "top_k": self.top_k,
-            "top_p": self.top_k,
+            "top_p": self.top_p,
             "temperature": self.temperature,
             "frequency_penalty": self.repeat_penalty,
         }
