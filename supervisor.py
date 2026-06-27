@@ -91,7 +91,6 @@ class Supervisor:
 
         self.models = self.requester.get_models()
         self.models_short = ""
-        print(self.models)
         if "data" in self.models:
             self.models_list = [x["id"] for x in self.models["data"]]
             for model in self.models_list:
@@ -128,6 +127,7 @@ class Supervisor:
             "v": self.visual,
             "o": self.options,
             "image": self.add_image,
+            "rmi": self.remove_image,
         }
 
     @property
@@ -170,6 +170,10 @@ class Supervisor:
             self.current_buffer.cond.notify()
 
     ############# internal commands
+    def remove_image(self, *args):  # pylint: disable=unused-argument
+        if "images" in self.current_data["messages"][-1]:
+            self.current_data["messages"][-1].pop("images")
+
     def add_image(self, *args):  # pylint: disable=unused-argument
         """add image to message"""
         if len(args) < 1:

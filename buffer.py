@@ -68,11 +68,32 @@ class Buffer:  # pylint: disable=R0902, R0904
 
     @property
     def openai_data(self):
+
+        def to_open_ai_msg(m):
+            non_text_content = []
+            if "images" in m:
+                for img in m["images"]:
+                    non_text_content.append(
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/png;base64,{img}"},
+                        }
+                    )
+            if len(non_text_content) != 0:
+                non_text_content.append(
+                    {"type": "text", "text": m["content"]},
+                )
+                return non_text_content
+            return m["content"]
+
         return {
             "model": self.chat_data["model"],
             "stream": self.chat_data["stream"],
             "think": self.chat_data["think"],
-            "messages": self.chat_data["messages"],
+            "messages": [
+                {"role": msg["role"], "content": to_open_ai_msg(msg)}
+                for msg in self.chat_data["messages"]
+            ],
             "top_k": self.top_k,
             "top_p": self.top_p,
             "temperature": self.temperature,
