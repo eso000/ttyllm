@@ -87,10 +87,7 @@ class Requester:
 
         raw = self._get_header(s)
 
-        if (
-            "Content-Type: application/json;" in raw[0]
-            or "content-type: application/jso" in raw[0]
-        ):
+        if "content-type: application/jso" in raw[0].lower():
             return self._handle_json(s, raw)
         return {}
 
@@ -98,7 +95,8 @@ class Requester:
         call = False
         if "message" in body:  # ollama api
             msg = body["message"]["content"]
-            chat.add_ai(msg)
+            if msg is not None:
+                chat.add_ai(msg)
             if body["done"]:
                 chat.tokens = body["prompt_eval_count"] + body["eval_count"]
             if "tool_calls" in body["message"]:
@@ -116,8 +114,9 @@ class Requester:
         if "message" in body["choices"][0]:
             msg = body["choices"][0]["message"]["content"]  # ignore choices
         else:
-            msg = body["choices"][0]["delta"]["content"]  # ignore choices
-        chat.add_ai(msg)
+            msg = body["choices"][0]["delta"].get("content", None)  # ignore choices
+        if msg is not None:
+            chat.add_ai(msg)
         if "usage" in body:
             chat.tokens = body["usage"]["total_tokens"]
         done = body["choices"][0]["finish_reason"] == "stop"
@@ -154,7 +153,7 @@ class Requester:
             self.dialog.set_text("\n".join(raw))
             return True
 
-        if "Content-Type: application/x-ndjson" in raw[0]:
+        if "content-type: application/x-ndjson" in raw[0].lower():
             body = raw[1].splitlines()
             done = False
             while not done and not chat.cancel:
@@ -172,10 +171,7 @@ class Requester:
                 body.pop(0)
                 body.pop(0)
 
-        if (
-            "Content-Type: text/event-stream" in raw[0]
-            or "content-type: text/event-stream" in raw[0]
-        ):
+        if "content-type: text/event-stream" in raw[0].lower():
             body = raw[1].splitlines()
             done = False
             while not done and not chat.cancel:
@@ -186,6 +182,7 @@ class Requester:
                     body = final.decode().splitlines()
                     body = [x for x in body if x != ""]
                 size = int(body[0], 16)
+
                 if size != len(body[1].encode()):
                     if len(body) >= 3:
                         final = "\n\n".join(body[1:]).encode()
@@ -194,13 +191,15 @@ class Requester:
                     final = self._get_all(final, size - 2, s)
                     final = body[1].encode()
                     body[1] = final.decode().splitlines()[0]
-                done, call = self._handle_msg(chat, json.loads(body[1][6:]))
-                if call:
-                    break
-                body.pop(0)
-                body.pop(0)
 
-        if "Content-Type: application/json" in raw[0]:
+                body.pop(0)
+                while len(body) > 0 and "data:" in body[0]:
+                    done, call = self._handle_msg(chat, json.loads(body[0][6:]))
+                    if call:
+                        break
+                    body.pop(0)
+
+        if "content-type: application/json" in raw[0].lower():
             body = self._handle_json(s, raw)
             _, call = self._handle_msg(chat, body)
         s.close()
