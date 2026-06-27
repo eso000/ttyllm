@@ -352,6 +352,8 @@ class Supervisor:
                     self.current_buffer.temperature = int(args[1])
                 case "pen":
                     self.current_buffer.repeat_penalty = float(args[1])
+                case "stream":
+                    self.current_data["stream"] = int(args[1]) & 1 == 1
                 case _:
                     self.create_dialog(f"comand {args[0]} not found")
 
