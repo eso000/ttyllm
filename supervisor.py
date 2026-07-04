@@ -128,6 +128,7 @@ class Supervisor:
             "o": self.options,
             "image": self.add_image,
             "rmi": self.remove_image,
+            "-": self.correct,
         }
 
     @property
@@ -239,6 +240,10 @@ class Supervisor:
         new.tokens = self.current_buffer.tokens
         self.buffers.append(new)
         self.change_buffer(len(self.buffers) - 1)
+
+    def correct(self, *args):  # pylint: disable=unused-argument
+        """removes last message"""
+        self.current_buffer.del_msg(1)
 
     def redo(self, *args):  # pylint: disable=unused-argument
         """regenerate last message"""
