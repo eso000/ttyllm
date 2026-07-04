@@ -414,3 +414,9 @@ class Buffer:  # pylint: disable=R0902, R0904
                 res += f"{self.normal_color}{self.ai_name}\n"
                 res += f"{self.ai_color}{msg_["content"]}\n"
         return res
+
+    def estimate_tokkens(self):
+        estimate = 0
+        for msg in self.chat_data["messages"]:
+            estimate += len(msg.get("content", ""))
+        return int(estimate / 4)
