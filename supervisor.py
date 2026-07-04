@@ -640,6 +640,8 @@ class Supervisor:
                     return
                 if len(self.current_data["messages"]) == 0:
                     self.current_buffer.add_msg("system")
+                if self.dialog.is_waiting:
+                    self.state = State.DIALOG
                 match self.state:
                     case State.NORMAL:
                         box = self.current_buffer.get_text_box(

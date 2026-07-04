@@ -91,8 +91,35 @@ class Requester:
             return self._handle_json(s, raw)
         return {}
 
+    def _handle_tool_call(self, chat: Buffer, tcalls):
+        chat.add_ai_tool(tcalls)
+        for tool_call in tcalls:
+            _args = tool_call["function"]["arguments"]
+            if isinstance(_args, str):
+                _args = json.loads(_args)
+            _reply = (
+                self.dialog.ask(
+                    (
+                        f'function: {tool_call["function"]["name"]}'
+                        f' arguments: {tool_call["function"]["arguments"]}'
+                    ),
+                    chat.cond,
+                )
+                if self.dialog
+                else "\n"
+            )
+            chat.chat_data["messages"].append(
+                {
+                    "role": "tool",
+                    "id": tool_call["id"],
+                    "tool_name": tool_call["function"]["name"],
+                    "content": (
+                        "user declined call" if _reply != "\n" else "42 degrees Celsius"
+                    ),
+                }
+            )
+
     def _handle_msg(self, chat: Buffer, body) -> (bool, bool):
-        call = False
         if "message" in body:  # ollama api
             msg = body["message"]["content"]
             if msg is not None:
@@ -100,27 +127,31 @@ class Requester:
             if body["done"]:
                 chat.tokens = body["prompt_eval_count"] + body["eval_count"]
             if "tool_calls" in body["message"]:
-                call = True
-                chat.add_ai_tool(body["message"]["tool_calls"])
-                for tool_call in body["message"]["tool_calls"]:
-                    chat.chat_data["messages"].append(
-                        {
-                            "role": "tool",
-                            "tool_name": tool_call["function"]["name"],
-                            "content": "42 degree Celsius",
-                        }
-                    )
-            return (body["done"], call)
+                self._handle_tool_call(chat, body["message"]["tool_calls"])
+                return (body["done"], True)
+            return (body["done"], False)
         if "message" in body["choices"][0]:
             msg = body["choices"][0]["message"]["content"]  # ignore choices
         else:
             msg = body["choices"][0]["delta"].get("content", None)  # ignore choices
+        done = body["choices"][0]["finish_reason"] == "stop"
         if msg is not None:
             chat.add_ai(msg)
         if "usage" in body:
             chat.tokens = body["usage"]["total_tokens"]
-        done = body["choices"][0]["finish_reason"] == "stop"
-        return (done, call)
+
+        if "message" in body["choices"][0]:
+            _tool_calls = body["choices"][0]["message"].get(
+                "tool_calls", None
+            )  # ignore choices
+        else:
+            _tool_calls = body["choices"][0]["delta"].get(
+                "tool_calls", None
+            )  # ignore choices
+        if _tool_calls:
+            self._handle_tool_call(chat, _tool_calls)
+            return (done, True)
+        return (done, False)
 
     def get_reply(self, chat: Buffer, wrapped=False) -> bool:
         call = False
@@ -194,6 +225,9 @@ class Requester:
 
                 body.pop(0)
                 while len(body) > 0 and "data:" in body[0]:
+                    if body[0].startswith("data: [DONE]"):
+                        done = True
+                        break
                     done, call = self._handle_msg(chat, json.loads(body[0][6:]))
                     if call:
                         break

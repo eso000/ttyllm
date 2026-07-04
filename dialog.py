@@ -1,4 +1,11 @@
 import threading
+import enum
+
+
+class DialogState(enum.Enum):
+    FREE = 1
+    WAITING = 2
+    SERVED = 3
 
 
 class Dialog:
@@ -6,6 +13,12 @@ class Dialog:
         self.cond = threading.Condition()
         self.reply = ""
         self.text = ""
+        self.state = DialogState.FREE
+
+    @property
+    def is_waiting(self):
+        with self.cond:
+            return self.state == DialogState.WAITING
 
     def get_text(self):
         with self.cond:
@@ -25,4 +38,19 @@ class Dialog:
     def set_reply(self, reply):
         with self.cond:
             self.reply = reply
+            self.state = DialogState.SERVED
             self.cond.notify()
+
+    def ask(self, text, cond):
+        with self.cond:
+            self.text = text
+            self.state = DialogState.WAITING
+            self.reply = ""
+            self.cond.notify()
+        with cond:
+            cond.notify()
+        with self.cond:
+            while self.state != DialogState.SERVED:
+                self.cond.wait()
+            self.state = DialogState.FREE
+            return self.reply

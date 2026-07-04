@@ -44,14 +44,17 @@ class Buffer:  # pylint: disable=R0902, R0904
             },
         }
         if self.TOOLS:
+            self.chat_data["tool_choice"] = "auto"
             self.chat_data["tools"] = [
                 {
                     "type": "function",
                     "function": {
                         "name": "get_temperature",
                         "description": "Get the current temperature for a city",
+                        "strict": True,
                         "parameters": {
                             "type": "object",
+                            "additionalProperties": False,
                             "required": ["city"],
                             "properties": {
                                 "city": {
