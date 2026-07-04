@@ -89,7 +89,7 @@ class Buffer:  # pylint: disable=R0902, R0904
                 return non_text_content
             return m["content"]
 
-        return {
+        data = {
             "model": self.chat_data["model"],
             "stream": self.chat_data["stream"],
             "think": self.chat_data["think"],
@@ -102,6 +102,10 @@ class Buffer:  # pylint: disable=R0902, R0904
             "temperature": self.temperature,
             "frequency_penalty": self.repeat_penalty,
         }
+        if self.TOOLS:
+            data["tool_choice"] = "auto"
+            data["tools"] = self.chat_data["tools"]
+        return data
 
     @property
     def ai_name(self):

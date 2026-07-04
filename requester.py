@@ -214,6 +214,8 @@ class Requester:
                     body = [x for x in body if x != ""]
                 size = int(body[0], 16)
 
+                with open("log", "w") as f:
+                    f.write(f"{body}\n")
                 if size != len(body[1].encode()):
                     if len(body) >= 3:
                         final = "\n\n".join(body[1:]).encode()
@@ -232,6 +234,8 @@ class Requester:
                     if call:
                         break
                     body.pop(0)
+                if call:
+                    break
 
         if "content-type: application/json" in raw[0].lower():
             body = self._handle_json(s, raw)
