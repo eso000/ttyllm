@@ -67,7 +67,6 @@ class Requester:
                 length = existing[0][existing[0].find("content-length: ") :]
             _find_c = length.find("\n")
             length = length[: len(length) if _find_c < 0 else _find_c]
-            print(length)
             size = int(length[15::])
             final = self._get_all(existing[1].encode(), size, socket_)
             ret = json.loads(final.decode())
@@ -91,10 +90,28 @@ class Requester:
             return self._handle_json(s, raw)
         return {}
 
-    def _handle_tool_call(self, chat: Buffer, tcalls):
+    def _handle_tool_call(self, chat: Buffer, tcalls, collection=None):
+        if collection is not None:
+            _id = tcalls[0].get("id", None)
+            _index = tcalls[0].get("index", None)
+            _type = tcalls[0].get("type", None)
+
+            if _type:
+                collection[_index] = {
+                    "id": _id,
+                    "index": _index,
+                    "function": tcalls[0]["function"],
+                }
+            else:
+                collection[_index]["function"]["arguments"] += tcalls[0]["function"][
+                    "arguments"
+                ]
+
+            return
         chat.add_ai_tool(tcalls)
         for tool_call in tcalls:
             _args = tool_call["function"]["arguments"]
+
             if isinstance(_args, str):
                 _args = json.loads(_args)
             _reply = (
@@ -119,7 +136,9 @@ class Requester:
                 }
             )
 
-    def _handle_msg(self, chat: Buffer, body) -> (bool, bool):
+    def _handle_msg(
+        self, chat: Buffer, body, tool_calls_collection=None
+    ) -> (bool, bool):
         if "message" in body:  # ollama api
             msg = body["message"]["content"]
             if msg is not None:
@@ -151,8 +170,8 @@ class Requester:
                 "tool_calls", None
             )  # ignore choices
         if _tool_calls:
-            self._handle_tool_call(chat, _tool_calls)
-            return (done, True)
+            self._handle_tool_call(chat, _tool_calls, tool_calls_collection)
+            return (done, tool_calls_collection is None)
         return (done, False)
 
     def get_reply(self, chat: Buffer, wrapped=False) -> bool:
@@ -207,6 +226,7 @@ class Requester:
         if "content-type: text/event-stream" in raw[0].lower():
             body = raw[1].splitlines()
             done = False
+            tool_calls_collection = {}
             while not done and not chat.cancel:
                 body = [x for x in body if x != ""]
 
@@ -216,8 +236,6 @@ class Requester:
                     body = [x for x in body if x != ""]
                 size = int(body[0], 16)
 
-                with open("log", "w") as f:
-                    f.write(f"{body}\n")
                 if size != len(body[1].encode()):
                     if len(body) >= 3:
                         final = "\n\n".join(body[1:]).encode()
@@ -232,12 +250,18 @@ class Requester:
                     if body[0].startswith("data: [DONE]"):
                         done = True
                         break
-                    done, call = self._handle_msg(chat, json.loads(body[0][6:]))
+                    done, call = self._handle_msg(
+                        chat, json.loads(body[0][6:]), tool_calls_collection
+                    )
                     if call:
                         break
                     body.pop(0)
                 if call:
                     break
+
+            if len(list(tool_calls_collection.values())) != 0:
+                self._handle_tool_call(chat, list(tool_calls_collection.values()))
+                call = True
 
         if "content-type: application/json" in raw[0].lower():
             body = self._handle_json(s, raw)

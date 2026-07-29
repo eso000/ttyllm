@@ -101,6 +101,7 @@ class Buffer:  # pylint: disable=R0902, R0904
             "top_p": self.top_p,
             "temperature": self.temperature,
             "frequency_penalty": self.repeat_penalty,
+            "stream_options": {"inclide_usage": True},
         }
         if self.TOOLS:
             data["tool_choice"] = "auto"
