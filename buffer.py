@@ -4,6 +4,7 @@ import json
 import threading
 
 from box_drawing import TextBox, text_to_lines, make_text_box
+import toolchain
 
 
 class ColorCodeExeption(Exception):
@@ -45,27 +46,7 @@ class Buffer:  # pylint: disable=R0902, R0904
         }
         if self.TOOLS:
             self.chat_data["tool_choice"] = "auto"
-            self.chat_data["tools"] = [
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "get_temperature",
-                        "description": "Get the current temperature for a city",
-                        "strict": True,
-                        "parameters": {
-                            "type": "object",
-                            "additionalProperties": False,
-                            "required": ["city"],
-                            "properties": {
-                                "city": {
-                                    "type": "string",
-                                    "description": "The name of the city",
-                                }
-                            },
-                        },
-                    },
-                }
-            ]
+            self.chat_data["tools"] = [tool.dict for tool in toolchain.toolchain]
 
         self.add_msg("system")
 

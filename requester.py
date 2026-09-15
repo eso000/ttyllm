@@ -5,6 +5,7 @@ import json
 
 from buffer import Buffer
 from dialog import Dialog
+import toolchain
 
 
 class Requester:
@@ -112,6 +113,11 @@ class Requester:
         for tool_call in tcalls:
             _args = tool_call["function"]["arguments"]
 
+            _tool = [
+                __tool
+                for __tool in toolchain.toolchain
+                if __tool.name == tool_call["function"]["name"]
+            ][0]
             if isinstance(_args, str):
                 _args = json.loads(_args)
             _reply = (
@@ -131,7 +137,11 @@ class Requester:
                     "id": tool_call["id"],
                     "tool_name": tool_call["function"]["name"],
                     "content": (
-                        "user declined call" if _reply != "\n" else "42 degrees Celsius"
+                        "user declined call"
+                        if _reply != "\n"
+                        else _tool.function(
+                            **json.loads(tool_call["function"]["arguments"])
+                        )
                     ),
                 }
             )
