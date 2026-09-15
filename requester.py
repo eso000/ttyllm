@@ -112,6 +112,8 @@ class Requester:
         chat.add_ai_tool(tcalls)
         for tool_call in tcalls:
             _args = tool_call["function"]["arguments"]
+            if not isinstance(_args, dict):
+                _arguments = json.loads(_args)
 
             _tool = [
                 __tool
@@ -124,7 +126,7 @@ class Requester:
                 self.dialog.ask(
                     (
                         f'function: {tool_call["function"]["name"]}'
-                        f' arguments: {tool_call["function"]["arguments"]}'
+                        f" arguments: {_args}"
                     ),
                     chat.cond,
                 )
@@ -139,9 +141,7 @@ class Requester:
                     "content": (
                         "user declined call"
                         if _reply != "\n"
-                        else _tool.function(
-                            **json.loads(tool_call["function"]["arguments"])
-                        )
+                        else _tool.function(**_args)
                     ),
                 }
             )

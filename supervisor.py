@@ -496,6 +496,7 @@ class Supervisor:
                     possible_completions = [
                         x for x in self.models_list if x.startswith(command_tokens[1])
                     ]
+                    open("log", "w").write(str(possible_completions))
                 case ":e" | "/e" | ":i" | "/i" | ":image" | "/image":
 
                     def _dir_completion(path):
@@ -521,6 +522,8 @@ class Supervisor:
                     common_prefix = common_prefix[:-1]
                 if common_prefix == "":
                     return
+            self.command += common_prefix[len(command_tokens[1]) :]
+            self.update_command()
 
     def get_input(self):
         fd = sys.stdin.fileno()
