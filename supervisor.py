@@ -497,7 +497,18 @@ class Supervisor:
                         x for x in self.models_list if x.startswith(command_tokens[1])
                     ]
                 case ":e" | "/e" | ":i" | "/i" | ":image" | "/image":
-                    possible_completions = glob(f"{command_tokens[1]}*")
+
+                    def _dir_completion(path):
+                        if not os.path.isdir(path):
+                            return path
+                        if path[-1] == "/":
+                            return path
+                        return path + "/"
+
+                    possible_completions = [
+                        _dir_completion(path) for path in glob(f"{command_tokens[1]}*")
+                    ]
+
             if len(possible_completions) == 0:
                 return
             if len(possible_completions) == 1:
@@ -510,10 +521,6 @@ class Supervisor:
                     common_prefix = common_prefix[:-1]
                 if common_prefix == "":
                     return
-            if os.path.isdir(common_prefix):
-                common_prefix += "/"
-            self.command += common_prefix[len(command_tokens[1]) :]
-            self.update_command()
 
     def get_input(self):
         fd = sys.stdin.fileno()
@@ -678,7 +685,7 @@ class Supervisor:
                         )
                         hide_cursor = True
 
-                (self.buffer_lines, self.buffer_last) = fit_to_box(
+                self.buffer_lines, self.buffer_last = fit_to_box(
                     box, self.columns - 4, self.lines - 5, 2, 3, hide_cursor=hide_cursor
                 )
                 self.current_buffer.updated = False
