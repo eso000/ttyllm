@@ -4,8 +4,9 @@ from tool import Tool, Parameter
 toolchain = []
 
 
-def temp(*args):
-    return "19 degrees Celsius"
+def read_file(file_path):
+    with open(file_path, "r") as file:
+        return file.read()
 
 
 def execute_shell_command(command):
@@ -14,10 +15,10 @@ def execute_shell_command(command):
 
 toolchain.append(
     Tool(
-        "get_temperature",
-        temp,
-        "Get the current temperature for a city",
-        [Parameter("city", "string", "The name of the city")],
+        "read_file",
+        read_file,
+        "reads the content of the file",
+        [Parameter("file_path", "string", "Path to the file to be read.")],
     )
 )
 toolchain.append(
