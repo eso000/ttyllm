@@ -35,7 +35,7 @@ def text_to_lines(text, width, color=""):
     return res
 
 
-def clean_screan() -> None:
+def clean_screen() -> None:
     print("\033[H\033[J\033[3J", end="", flush=True)
 
 

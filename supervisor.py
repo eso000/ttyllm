@@ -10,8 +10,8 @@ import base64
 from glob import glob
 from enum import Enum
 
-from box_drawing import make_text_box, clean_screan, fit_text_to_box, fit_to_box
-from buffer import Buffer, ColorCodeExeption
+from box_drawing import make_text_box, clean_screen, fit_text_to_box, fit_to_box
+from buffer import Buffer, ColorCodeException
 from requester import Requester
 from dialog import Dialog
 
@@ -30,7 +30,7 @@ class Queue:
         self.cond = threading.Condition()
         self.qu = []
 
-    def scheduel(self, chat):
+    def schedule(self, chat):
         if chat.queued or chat.in_request:
             return
         with self.cond:
@@ -39,7 +39,7 @@ class Queue:
             self.cond.notify()
             chat.notify()
 
-    def descheduel(self, chat):
+    def deschedule(self, chat):
         with self.cond:
             for index, scheduled_chat in enumerate(self.qu):
                 if scheduled_chat == chat:
@@ -147,13 +147,13 @@ class Supervisor:
 
     def handle_sigint(self):
         self.current_buffer.cancel_request()
-        self.queue.descheduel(self.current_buffer)
+        self.queue.deschedule(self.current_buffer)
 
     def handle_sigwinch(self, signum, frame):  # pylint: disable=unused-argument
         size = shutil.get_terminal_size()
         self.columns = size.columns
         self.lines = size.lines
-        clean_screan()
+        clean_screen()
         self.update_command()
         self.current_buffer.notify()
 
@@ -248,7 +248,7 @@ class Supervisor:
     def redo(self, *args):  # pylint: disable=unused-argument
         """regenerate last message"""
         self.current_buffer.del_msg(2)
-        self.queue.scheduel(self.current_buffer)
+        self.queue.schedule(self.current_buffer)
 
     def start_over(self, *args):  # pylint: disable=unused-argument
         """reset current buffer"""
@@ -296,7 +296,7 @@ class Supervisor:
         self.current_buffer.notify()
 
     def change_ai(self, *args):  # pylint: disable=unused-argument
-        """change current message to assistent"""
+        """change current message to assistant"""
         self.current_buffer.change_msg("assistant")
 
     def change_user(self, *args):  # pylint: disable=unused-argument
@@ -360,7 +360,7 @@ class Supervisor:
                 case "stream":
                     self.current_data["stream"] = int(args[1]) & 1 == 1
                 case _:
-                    self.create_dialog(f"comand {args[0]} not found")
+                    self.create_dialog(f"command {args[0]} not found")
 
     def visual(self, *args):
         if len(args) == 0:
@@ -381,8 +381,8 @@ class Supervisor:
                     case "nc":
                         self.current_buffer.normal_color = args[1]
                     case _:
-                        self.create_dialog(f"comand {args[0]} not found")
-            except ColorCodeExeption:
+                        self.create_dialog(f"command {args[0]} not found")
+            except ColorCodeException:
                 self.create_dialog(f"invalid color code :{args[1]}")
 
     def process_command(self) -> bool:
@@ -404,7 +404,7 @@ class Supervisor:
         if self.current_data["messages"][-1]["role"] != "user":
             self.current_buffer.change_msg("user")
         else:
-            self.queue.scheduel(self.current_buffer)
+            self.queue.schedule(self.current_buffer)
 
     def queue_manager(self):
         while self.run:
@@ -695,7 +695,7 @@ class Supervisor:
 
     def run_chat(self) -> None:
         print("\033[?1049h", end="", flush=True)
-        clean_screan()
+        clean_screen()
         self.run = True
         fd = sys.stdin.fileno()
         old = termios.tcgetattr(fd)
@@ -717,7 +717,7 @@ class Supervisor:
         for thread in threads:
             thread.join()
 
-        clean_screan()
+        clean_screen()
         print("\033[?25h", end="", flush=True)
         print("\033[?1049l", end="", flush=True)
         termios.tcsetattr(fd, termios.TCSADRAIN, old)

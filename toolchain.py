@@ -28,7 +28,7 @@ toolchain.append(
         "executes a Linux-shell command on the users machine and returns the output",
         [
             Parameter(
-                "command", "string", "the full comand to be executed on the machine"
+                "command", "string", "the full command to be executed on the machine"
             )
         ],
     )

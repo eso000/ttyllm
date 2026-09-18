@@ -169,7 +169,7 @@ class Requester:
         if "usage" in body:
             chat.tokens = body["usage"]["total_tokens"]
         elif done:
-            chat.tokens = chat.estimate_tokkens()
+            chat.tokens = chat.estimate_tokens()
 
         if "message" in body["choices"][0]:
             _tool_calls = body["choices"][0]["message"].get(
