@@ -235,6 +235,14 @@ class Buffer:  # pylint: disable=R0902, R0904
             self.updated = True
             self.cond.notify()
 
+    def currently_typed(self):
+        with self.cond:
+            last = self.chat_data["messages"][-1]
+            return (
+                not (self.in_request or self.queued),
+                len(last.get("content", "")) == 0,
+            )
+
     def add_open(self, ch):
         with self.cond:
             if self.in_request:

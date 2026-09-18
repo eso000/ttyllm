@@ -399,12 +399,15 @@ class Supervisor:
         return True
 
     def handle_new_message(self):
-        content = self.current_data["messages"][-1]["content"].replace("\\n", "\n")
-        self.current_data["messages"][-1]["content"] = content
-        if self.current_data["messages"][-1]["role"] != "user":
-            self.current_buffer.change_msg("user")
-        else:
-            self.queue.schedule(self.current_buffer)
+        with self.current_buffer.cond:
+            last = self.current_data["messages"][-1]
+            last["content"] = last["content"].replace("\\n", "\n")
+            if last["role"] != "user":
+                self.current_buffer.change_msg("user")
+                return
+            self.current_buffer.updated = True
+            self.current_buffer.cond.notify()
+        self.queue.schedule(self.current_buffer)
 
     def queue_manager(self):
         while self.run:
@@ -496,7 +499,6 @@ class Supervisor:
                     possible_completions = [
                         x for x in self.models_list if x.startswith(command_tokens[1])
                     ]
-                    open("log", "w").write(str(possible_completions))
                 case ":e" | "/e" | ":i" | "/i" | ":image" | "/image":
 
                     def _dir_completion(path):
@@ -604,34 +606,17 @@ class Supervisor:
                             self.state = State.NORMAL
                             self.current_buffer.notify()
                 if 32 <= ord(ch) <= 126:
-                    if (
-                        (
-                            len(self.current_data["messages"][-1]["content"]) == 0
-                            or self.current_buffer.queued
-                            or self.current_buffer.in_request
-                        )
-                        and self.command == ""
-                        and ch
-                        in (
-                            "/",
-                            ":",
-                        )
+                    idle, last_empty = self.current_buffer.currently_typed()
+                    if (last_empty or not idle) and self.command == "" and ch in (
+                        "/",
+                        ":",
                     ):
                         self.command = ch
                         self.update_command()
-                    elif (
-                        not self.current_buffer.in_request
-                        and not self.current_buffer.queued
-                        and not self.command != ""
-                    ):
-                        if self.state == State.DIALOG:
-                            self.state = State.NORMAL
-                            self.dialog_reply = ch
-                            self.current_buffer.notify()
-                        else:
-                            self.buffer_last = -1
-                            self.state = State.NORMAL
-                            self.current_buffer.add_open(ch)
+                    elif idle and self.command == "":
+                        self.buffer_last = -1
+                        self.state = State.NORMAL
+                        self.current_buffer.add_open(ch)
                     elif len(self.command) > 0:
                         self.command += ch
                         self.update_command()
