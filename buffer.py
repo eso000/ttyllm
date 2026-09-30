@@ -406,7 +406,12 @@ class Buffer:  # pylint: disable=R0902, R0904
         return res
 
     def estimate_tokens(self):
-        estimate = 0
-        for msg in self.chat_data["messages"]:
-            estimate += len(msg.get("content", ""))
+        with self.cond:
+            estimate = 0
+            for msg in self.chat_data["messages"]:
+                estimate += len(msg.get("content", ""))
         return int(estimate / 4)
+
+    def set_tokens(self, tokens):
+        with self.cond:
+            self.tokens = tokens

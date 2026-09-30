@@ -46,7 +46,6 @@ class Dialog:
             self.text = text
             self.state = DialogState.WAITING
             self.reply = ""
-            self.cond.notify()
         with cond:
             cond.notify()
         with self.cond:

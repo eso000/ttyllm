@@ -164,10 +164,10 @@ class Supervisor:
     def change_buffer(self, new_id):
         old_buffer = self.current_buffer
         self.current_buffer_id = new_id
+        with old_buffer.cond:
+            old_buffer.cond.notify()
         with self.current_buffer.cond:
             self.current_buffer.updated = True
-            with old_buffer.cond:
-                old_buffer.cond.notify()
             self.current_buffer.cond.notify()
 
     ############# internal commands
@@ -276,17 +276,15 @@ class Supervisor:
 
     def buffer_delete(self, *args):  # pylint: disable=unused-argument
         """delete current buffer"""
-        cond = self.current_buffer.cond
+        old_buffer = self.current_buffer
         self.buffers.pop(self.current_buffer_id)
         if len(self.buffers) == 0:
             self.buffers.append(Buffer())
         if self.current_buffer_id == len(self.buffers):
             self.current_buffer_id -= 1
-        with self.current_buffer.cond:
-            self.current_buffer.updated = True
-            self.current_buffer.cond.notify()
-            with cond:
-                cond.notify()
+        with old_buffer.cond:
+            old_buffer.cond.notify()
+        self.current_buffer.notify()
 
     def switch_model(self, *args):
         """show models"""

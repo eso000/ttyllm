@@ -1,4 +1,7 @@
 import dataclasses
+import threading
+
+_print_lock = threading.Lock()
 
 
 @dataclasses.dataclass
@@ -36,7 +39,8 @@ def text_to_lines(text, width, color=""):
 
 
 def clean_screen() -> None:
-    print("\033[H\033[J\033[3J", end="", flush=True)
+    with _print_lock:
+        print("\033[H\033[J\033[3J", end="", flush=True)
 
 
 def make_text_box(text, width, last=-1, color="") -> TextBox:
@@ -49,45 +53,46 @@ def make_text_box(text, width, last=-1, color="") -> TextBox:
 def fit_to_box(
     box, width, height, start_x=1, start_y=1, background="", hide_cursor=False
 ):
-    # for x in range(height):
+    with _print_lock:
+        # for x in range(height):
 
-    lines, last = (box.lines, box.last)
+        lines, last = (box.lines, box.last)
 
-    start = 0
-    if last < 0:
-        last = len(lines)
-    print("\033[?25l", end="")
+        start = 0
+        if last < 0:
+            last = len(lines)
+        print("\033[?25l", end="")
 
-    if len(lines) <= height:
-        last = len(lines)
-    last = max(last, height)
-    if last >= height:
-        start = max(0, last - height)
-    print(f"\033[{start_x};{start_y}H", end="", flush=True)
+        if len(lines) <= height:
+            last = len(lines)
+        last = max(last, height)
+        if last >= height:
+            start = max(0, last - height)
+        print(f"\033[{start_x};{start_y}H", end="", flush=True)
 
-    for x in range(max(0, height - len(lines))):
-        print(f"{background}\033[{start_x+x+ len(lines)};{start_y}H", end="")
-        print(width * " ", end="")
+        for x in range(max(0, height - len(lines))):
+            print(f"\033[{start_x+x+ len(lines)};{start_y}H", end="")
+            print(width * " ", end="")
 
-    for x, line in enumerate(lines[start:last]):
-        print(f"\033[{start_x+x};{start_y}H", end="")
-        print(f"{background}{width * ' '}", end="")
-        print(f"\033[{start_x+x};{start_y}H", end="")
-        print(
-            line,
-            end="",
-        )
+        for x, line in enumerate(lines[start:last]):
+            print(f"\033[{start_x+x};{start_y}H", end="")
+            print(f"{background}{width * ' '}", end="")
+            print(f"\033[{start_x+x};{start_y}H", end="")
+            print(
+                line,
+                end="",
+            )
 
-    print("\033[0m", end="", flush=True)
+        print("\033[0m", end="", flush=True)
 
-    if box.last != -1 or hide_cursor:
-        print("\033[?25l", end="", flush=True)
-    else:
-        print("\033[?25h", end="", flush=True)
+        if box.last != -1 or hide_cursor:
+            print("\033[?25l", end="", flush=True)
+        else:
+            print("\033[?25h", end="", flush=True)
 
-    if box.last == -1:
-        return (len(lines), -1)
-    return (len(lines), max(last, height))
+        if box.last == -1:
+            return (len(lines), -1)
+        return (len(lines), max(last, height))
 
 
 def fit_text_to_box(
