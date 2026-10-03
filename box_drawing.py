@@ -11,7 +11,7 @@ class TextBox:
 
 
 def text_to_lines(text, width, color=""):
-    if text == "":
+    if text == "" or width <= 0:
         return [""]
     res = []
     res_lines = text.replace("\t", "   ").split("\n")
@@ -23,6 +23,10 @@ def text_to_lines(text, width, color=""):
             while start <= len(line) - 1:
                 step = 0
                 line_fitting_part = line[start : start + width]
+                if start > 0:
+                    spaces = len(line_fitting_part) - len(line_fitting_part.lstrip(" "))
+                    start += spaces
+                    line_fitting_part = line[start : start + width]
                 if len(line_fitting_part) + start < len(line):
                     last_space = line_fitting_part.rfind(" ")
                     if last_space != -1:

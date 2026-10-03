@@ -1,7 +1,9 @@
+import codecs
 import json
 import sys
 import termios
 import threading
+import time
 import signal
 import shutil
 import select
@@ -13,7 +15,6 @@ from enum import Enum
 from box_drawing import make_text_box, clean_screen, fit_text_to_box, fit_to_box
 from buffer import Buffer, ColorCodeException
 from requester import Requester
-from dialog import Dialog
 
 
 class State(Enum):
@@ -22,7 +23,6 @@ class State(Enum):
     DATA = 2
     HELP = 3
     MODELS = 4
-    DIALOG = 5
 
 
 class Queue:
@@ -31,9 +31,9 @@ class Queue:
         self.qu = []
 
     def schedule(self, chat):
-        if chat.queued or chat.in_request:
-            return
         with self.cond:
+            if chat.queued or chat.in_request:
+                return
             self.qu.append(chat)
             chat.queued = True
             self.cond.notify()
@@ -69,8 +69,8 @@ class Supervisor:
 
         self.buffers = [Buffer()]
         self.current_buffer_id = 0
-        self.dialog = Dialog()
-        self.requester = Requester(dialog=self.dialog, open_api=open_api)
+        self.notification = ""
+        self.requester = Requester(open_api=open_api)
 
         self.run = True
 
@@ -79,7 +79,6 @@ class Supervisor:
         self.input_cond = threading.Condition()
         self.buffer_last = -1
         self.buffer_lines = -1
-        self.buffer_changed = False
 
         self.queue = Queue()
 
@@ -89,23 +88,15 @@ class Supervisor:
         self.state = State.NORMAL
         signal.signal(signal.SIGWINCH, self.handle_sigwinch)
 
-        self.models = self.requester.get_models()
+        self.models = []
+        self.models_list = []
         self.models_short = ""
-        if "data" in self.models:
-            self.models_list = [x["id"] for x in self.models["data"]]
-            for model in self.models_list:
-                self.models_short += f"{model}\n"
-        else:
-            self.models_list = [x["name"] for x in self.models["models"]]
-            for model in self.models["models"]:
-                self.models_short += (
-                    f"{model["name"]:<20}"
-                    f"\t {model["size"] // 1073741824:} GB"
-                    f"\t{model["details"]["parameter_size"]}\n"
-                )
+        self.load_models()
+        self._report_models()
 
         self.commands = {
             "m": self.list_models,
+            "mr": self.refresh_models,
             "h": self.help,
             "n": self.normal_view,
             "d": self.show_data,
@@ -139,15 +130,22 @@ class Supervisor:
     def current_data(self):
         return self.current_buffer.chat_data
 
-    def create_dialog(self, message=None):
-        if message:
-            self.dialog.set_text(message)
-        self.state = State.DIALOG
+    def show_notification(self, message):
+        """shown over the chat until the user presses a key"""
+        self.notification = message
+        self.buffer_last = 0
         self.current_buffer.notify()
 
     def handle_sigint(self):
-        self.current_buffer.cancel_request()
-        self.queue.deschedule(self.current_buffer)
+        buffer = self.current_buffer
+        self.queue.deschedule(buffer)
+        if not buffer.abort_pending():
+            buffer.cancel_request()
+
+    def decide_tool_call(self, approved):
+        buffer = self.current_buffer
+        if buffer.decide(approved):
+            self.queue.schedule(buffer)
 
     def handle_sigwinch(self, signum, frame):  # pylint: disable=unused-argument
         size = shutil.get_terminal_size()
@@ -158,8 +156,14 @@ class Supervisor:
         self.current_buffer.notify()
 
     def get_reply(self, buffer):
-        if self.requester.get_reply(buffer):
-            self.create_dialog()
+        if buffer.pending_resolved():
+            error = self.requester.resume(buffer)
+        else:
+            error = self.requester.get_reply(buffer)
+        if error:
+            self.show_notification(error)
+        else:
+            self.current_buffer.notify()  # status line may list new approvals
 
     def change_buffer(self, new_id):
         old_buffer = self.current_buffer
@@ -171,9 +175,43 @@ class Supervisor:
             self.current_buffer.cond.notify()
 
     ############# internal commands
+    def load_models(self):
+        self.models = self.requester.get_models()
+        self.models_list = [model.name for model in self.models]
+        self.models_short = "".join(
+            self._format_model(model) for model in self.models
+        )
+
+    @staticmethod
+    def _format_model(model) -> str:
+        if model.size_gb is None:  # openai api provides names only
+            return f"{model.name}\n"
+        return (
+            f"{model.name:<20}"
+            f"\t {model.size_gb} GB"
+            f"\t{model.parameter_size}\n"
+        )
+
+    def _models_problem(self):
+        endpoint = f"{self.requester.host}:{self.requester.port}"
+        if self.requester.models_error:
+            return f"cannot reach {endpoint} - {self.requester.models_error}"
+        if not self.models_list:
+            return f"no models found on {endpoint}"
+        return None
+
+    def _report_models(self):
+        """notify about a failed or empty model list, True if there was a problem"""
+        problem = self._models_problem()
+        if problem:
+            self.show_notification(problem)
+        return problem is not None
+
     def remove_image(self, *args):  # pylint: disable=unused-argument
-        if "images" in self.current_data["messages"][-1]:
-            self.current_data["messages"][-1].pop("images")
+        """remove images from current message"""
+        with self.current_buffer.cond:
+            if "images" in self.current_data["messages"][-1]:
+                self.current_data["messages"][-1].pop("images")
 
     def add_image(self, *args):  # pylint: disable=unused-argument
         """add image to message"""
@@ -185,14 +223,15 @@ class Supervisor:
         try:
             with open(args[0], "rb") as file:
                 img = base64.b64encode(file.read()).decode("utf-8")
+            with self.current_buffer.cond:
                 if "images" not in self.current_data["messages"][-1]:
                     self.current_data["messages"][-1]["images"] = []
                 self.current_data["messages"][-1]["images"].append(img)
 
         except PermissionError:
-            self.create_dialog(f"insufficient permissions for {args[0]}")
+            self.show_notification(f"insufficient permissions for {args[0]}")
         except FileNotFoundError:
-            self.create_dialog(f"File {args[0]} not found")
+            self.show_notification(f"File {args[0]} not found")
 
     def list_models(self, *args):  # pylint: disable=unused-argument
         """list all models"""
@@ -202,17 +241,30 @@ class Supervisor:
             self.current_buffer.updated = True
             self.current_buffer.cond.notify()
 
+    def refresh_models(self, *args):  # pylint: disable=unused-argument
+        """fetch the model list from the server again"""
+        self.load_models()
+        if not self._report_models():
+            self.show_notification(f"loaded {len(self.models_list)} models")
+
     def help(self, *args):  # pylint: disable=unused-argument
         """show help"""
         with self.current_buffer.cond:
-            help_string = ""
-            for name, function in self.commands.items():
-                help_string += f"{name}:\t{function.__doc__}\n"
-            self.create_dialog(help_string)
+            self.buffer_last = 0
+            self.state = State.HELP
+            self.current_buffer.updated = True
+            self.current_buffer.cond.notify()
+
+    def _help_text(self):
+        lines = ["commands  (up/down: scroll, enter: back to chat)", ""]
+        for name, function in self.commands.items():
+            lines.append(f"{name}:\t{function.__doc__ or ''}")
+        return "\n".join(lines)
 
     def normal_view(self, *args):  # pylint: disable=unused-argument
         """show chat"""
         with self.current_buffer.cond:
+            self.buffer_last = -1
             self.state = State.NORMAL
             self.current_buffer.updated = True
             self.current_buffer.cond.notify()
@@ -234,10 +286,14 @@ class Supervisor:
 
     def split(self, *args):  # pylint: disable=unused-argument
         """creates new buffer from current"""
+        if self.current_buffer.pending_calls:
+            self.show_notification("answer the pending tool calls before splitting")
+            return
         new = Buffer()
-        new.chat_data = json.loads(json.dumps(self.current_data))
-        new.visual_data = json.loads(json.dumps(self.current_buffer.visual_data))
-        new.tokens = self.current_buffer.tokens
+        with self.current_buffer.cond:
+            new.chat_data = json.loads(json.dumps(self.current_data))
+            new.visual_data = json.loads(json.dumps(self.current_buffer.visual_data))
+            new.tokens = self.current_buffer.tokens
         self.buffers.append(new)
         self.change_buffer(len(self.buffers) - 1)
 
@@ -277,6 +333,8 @@ class Supervisor:
     def buffer_delete(self, *args):  # pylint: disable=unused-argument
         """delete current buffer"""
         old_buffer = self.current_buffer
+        self.queue.deschedule(old_buffer)
+        old_buffer.abort_pending()
         self.buffers.pop(self.current_buffer_id)
         if len(self.buffers) == 0:
             self.buffers.append(Buffer())
@@ -287,10 +345,11 @@ class Supervisor:
         self.current_buffer.notify()
 
     def switch_model(self, *args):
-        """show models"""
+        """switch model -- argument: model name"""
         if len(args) < 1:
             return
-        self.current_data["model"] = args[0]
+        with self.current_buffer.cond:
+            self.current_data["model"] = args[0]
         self.current_buffer.notify()
 
     def change_ai(self, *args):  # pylint: disable=unused-argument
@@ -315,36 +374,38 @@ class Supervisor:
                     data = json.load(file)
                     self.current_buffer.set_data(data)
                 except json.JSONDecodeError:
-                    self.create_dialog(f"File {args[0]} is corrupted")
+                    self.show_notification(f"File {args[0]} is corrupted")
         except PermissionError:
-            self.create_dialog(f"insufficient permissions for {args[0]}")
+            self.show_notification(f"insufficient permissions for {args[0]}")
         except FileNotFoundError:
-            self.create_dialog(f"File {args[0]} not found")
+            self.show_notification(f"File {args[0]} not found")
 
     def export_chat(self, *args):
         """export chat from file -- argument: file name"""
         if len(args) < 1:
             return
+        with self.current_buffer.cond:
+            data = json.dumps(
+                {
+                    "visual": self.current_buffer.visual_data,
+                    "chat": self.current_data,
+                },
+                indent=4,
+            )
         try:
             with open(args[0], "w", encoding="utf-8") as file:
-                json.dump(
-                    {
-                        "visual": self.current_buffer.visual_data,
-                        "chat": self.current_data,
-                    },
-                    file,
-                    indent=4,
-                )
+                file.write(data)
         except PermissionError:
-            self.create_dialog(f"insufficient permissions for {args[0]}")
+            self.show_notification(f"insufficient permissions for {args[0]}")
         except FileNotFoundError:
-            self.create_dialog(f"File {args[0]} not found")
+            self.show_notification(f"File {args[0]} not found")
 
     def options(self, *args):
+        """show or set options -- arguments: k|p|t|pen|stream value"""
         if len(args) == 0:
-            self.create_dialog(json.dumps(self.current_buffer.options, indent=3))
+            self.show_notification(json.dumps(self.current_buffer.options, indent=3))
         elif len(args) == 1:
-            self.create_dialog("no data provided")
+            self.show_notification("no data provided")
         else:
             match args[0]:
                 case "k":
@@ -358,13 +419,16 @@ class Supervisor:
                 case "stream":
                     self.current_data["stream"] = int(args[1]) & 1 == 1
                 case _:
-                    self.create_dialog(f"command {args[0]} not found")
+                    self.show_notification(f"command {args[0]} not found")
 
     def visual(self, *args):
+        """show or set looks -- arguments: un|an|uc|ac|nc value"""
         if len(args) == 0:
-            self.create_dialog(json.dumps(self.current_buffer.visual_data, indent=3))
+            self.show_notification(
+                json.dumps(self.current_buffer.visual_data, indent=3)
+            )
         elif len(args) == 1:
-            self.create_dialog("no data provided")
+            self.show_notification("no data provided")
         else:
             try:
                 match args[0]:
@@ -379,17 +443,15 @@ class Supervisor:
                     case "nc":
                         self.current_buffer.normal_color = args[1]
                     case _:
-                        self.create_dialog(f"command {args[0]} not found")
+                        self.show_notification(f"command {args[0]} not found")
             except ColorCodeException:
-                self.create_dialog(f"invalid color code :{args[1]}")
+                self.show_notification(f"invalid color code :{args[1]}")
 
-    def process_command(self) -> bool:
-        command = self.command.split(" ")
+    def process_command(self, command) -> bool:
+        command = command.split(" ")
         if command[0][0] not in (":", "/"):
             return True
         command[0] = command[0][1:]
-        self.command = ""
-        self.update_command()
         if command[0] == "q":
             return False
         if command[0] in self.commands:
@@ -397,15 +459,16 @@ class Supervisor:
         return True
 
     def handle_new_message(self):
-        with self.current_buffer.cond:
-            last = self.current_data["messages"][-1]
+        buffer = self.current_buffer
+        with buffer.cond:
+            last = buffer.chat_data["messages"][-1]
             last["content"] = last["content"].replace("\\n", "\n")
             if last["role"] != "user":
-                self.current_buffer.change_msg("user")
+                buffer.change_msg("user")
                 return
-            self.current_buffer.updated = True
-            self.current_buffer.cond.notify()
-        self.queue.schedule(self.current_buffer)
+            buffer.updated = True
+            buffer.cond.notify()
+        self.queue.schedule(buffer)
 
     def queue_manager(self):
         while self.run:
@@ -423,10 +486,12 @@ class Supervisor:
                 while not self.input_done and self.run:
                     self.input_cond.wait()
                 self.input_done = False
+                command, self.command = self.command, ""
             if not self.run:
                 return
-            if len(self.command) > 0:
-                self.process_command()
+            self.update_command()
+            if len(command) > 0:
+                self.process_command(command)
             else:
                 self.handle_new_message()
 
@@ -467,12 +532,18 @@ class Supervisor:
 
     def update_command(self):
         if self.command == "":
+            waiting = [
+                str(number)
+                for number, buffer in enumerate(self.buffers, 1)
+                if buffer.awaiting_approval
+            ]
             fit_text_to_box(
                 f"    model: {self.current_data['model']}"
                 f" -- tokens: {self.current_buffer.tokens}"
                 f"   buffer: {self.current_buffer_id + 1} of {len(self.buffers)}"
                 f" {'in_request' if self.current_buffer.in_request else
-                    "queued" if self.current_buffer.queued else ""} ",
+                    "queued" if self.current_buffer.queued else ""} "
+                f"{'approval needed in: ' + ', '.join(waiting) if waiting else ''}",
                 self.columns,
                 1,
                 self.lines,
@@ -525,14 +596,39 @@ class Supervisor:
             self.command += common_prefix[len(command_tokens[1]) :]
             self.update_command()
 
+    def stop(self):
+        self.run = False
+        for buffer in self.buffers:
+            buffer.cancel_request()
+        with self.current_buffer.cond:
+            self.current_buffer.cond.notify()
+        with self.queue.cond:
+            self.queue.cond.notify()
+        with self.input_cond:
+            self.input_cond.notify()
+
     def get_input(self):
         fd = sys.stdin.fileno()
+        decoder = codecs.getincrementaldecoder("utf-8")("replace")
         while self.run:
-            ch = os.read(fd, 1).decode()
-            if self.state == State.DIALOG:
-                self.dialog.set_reply(ch)
-                self.state = State.NORMAL
+            data = os.read(fd, 1)
+            if not data:
+                self.stop()
+                return
+            ch = decoder.decode(data)
+            if not ch:
+                continue
+            if self.notification:
+                self.notification = ""
                 self.current_buffer.notify()
+                continue
+            if (
+                ch in ("y", "n")
+                and self.state == State.NORMAL
+                and self.command == ""
+                and self.current_buffer.awaiting_approval
+            ):
+                self.decide_tool_call(ch == "y")
                 continue
             with self.input_cond:
                 match ord(ch):
@@ -586,13 +682,7 @@ class Supervisor:
                 if not ch or ch == "\r" or ch == "\n":
                     if self.command != "":
                         if self.command in ("/q", ":q"):
-                            self.run = False
-                            for buffer in self.buffers:
-                                buffer.cancel_request()
-                            with self.current_buffer.cond:
-                                self.current_buffer.cond.notify()
-                            with self.queue.cond:
-                                self.queue.cond.notify()
+                            self.stop()
                         self.update_command()
                         self.input_done = True
                         self.input_cond.notify()
@@ -601,9 +691,10 @@ class Supervisor:
                             self.input_done = True
                             self.input_cond.notify()
                         else:
+                            self.buffer_last = -1
                             self.state = State.NORMAL
                             self.current_buffer.notify()
-                if 32 <= ord(ch) <= 126:
+                if ch.isprintable():
                     idle, last_empty = self.current_buffer.currently_typed()
                     if (last_empty or not idle) and self.command == "" and ch in (
                         "/",
@@ -623,58 +714,51 @@ class Supervisor:
 
     def update_buffer(self):
         while self.run:
-            with self.current_buffer.cond:
-                while (
-                    not self.current_buffer.updated
-                    and self.run
-                    and not self.buffer_changed
-                ):
-                    self.current_buffer.cond.wait()
-                self.update_command()
-                if self.buffer_changed:
-                    self.buffer_changed = False
-                    continue
+            buffer = self.current_buffer
+            with buffer.cond:
+                while not buffer.updated and self.run and buffer is self.current_buffer:
+                    buffer.cond.wait()
                 if not self.run:
                     return
-                if len(self.current_data["messages"]) == 0:
-                    self.current_buffer.add_msg("system")
-                if self.dialog.is_waiting:
-                    self.state = State.DIALOG
+                if buffer is not self.current_buffer:
+                    continue
+                if len(buffer.chat_data["messages"]) == 0:
+                    buffer.add_msg("system")
+                last = self.buffer_last
                 match self.state:
+                    case _ if self.notification:
+                        box = make_text_box(self.notification, self.columns - 4, last)
+                        hide_cursor = True
                     case State.NORMAL:
-                        box = self.current_buffer.get_text_box(
-                            self.columns - 4, self.buffer_last
-                        )
+                        box = buffer.get_text_box(self.columns - 4, last)
                         hide_cursor = False
                     case State.SYSTEM:
-                        box = self.current_buffer.get_text_box_system(
-                            self.columns - 4, self.buffer_last
-                        )
+                        box = buffer.get_text_box_system(self.columns - 4, last)
                         hide_cursor = True
                     case State.DATA:
-                        box = self.current_buffer.get_text_box_data(
-                            self.columns - 4, self.buffer_last
-                        )
+                        box = buffer.get_text_box_data(self.columns - 4, last)
+                        hide_cursor = True
+                    case State.HELP:
+                        box = make_text_box(self._help_text(), self.columns - 4, last)
                         hide_cursor = True
                     case State.MODELS:
                         box = make_text_box(
                             # json.dumps(self.models, indent=4),
                             self.models_short,
                             self.columns - 4,
-                            self.buffer_last,
-                        )
-                    case State.DIALOG:
-                        box = make_text_box(
-                            self.dialog.get_text(),
-                            self.columns - 4,
-                            self.buffer_last,
+                            last,
                         )
                         hide_cursor = True
+                buffer.updated = False
 
-                self.buffer_lines, self.buffer_last = fit_to_box(
-                    box, self.columns - 4, self.lines - 5, 2, 3, hide_cursor=hide_cursor
-                )
-                self.current_buffer.updated = False
+            self.update_command()
+            lines, new_last = fit_to_box(
+                box, self.columns - 4, self.lines - 5, 2, 3, hide_cursor=hide_cursor
+            )
+            with self.input_cond:
+                self.buffer_lines = lines
+                if self.buffer_last == last:  # not scrolled while drawing
+                    self.buffer_last = new_last
 
     def run_chat(self) -> None:
         print("\033[?1049h", end="", flush=True)
@@ -688,19 +772,32 @@ class Supervisor:
         termios.tcsetattr(fd, termios.TCSADRAIN, new)
 
         threads = [
-            threading.Thread(target=self.get_input),
-            threading.Thread(target=self.update_buffer),
-            threading.Thread(target=self.watcher),
-            threading.Thread(target=self.queue_manager),
+            threading.Thread(target=self._guarded(self.get_input)),
+            threading.Thread(target=self._guarded(self.update_buffer)),
+            threading.Thread(target=self._guarded(self.watcher)),
+            threading.Thread(target=self._guarded(self.queue_manager)),
         ]
 
-        for thread in threads:
-            thread.start()
+        try:
+            for thread in threads:
+                thread.start()
 
-        for thread in threads:
-            thread.join()
+            for thread in threads:
+                thread.join()
+        finally:
+            clean_screen()
+            print("\033[?25h", end="", flush=True)
+            print("\033[?1049l", end="", flush=True)
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
-        clean_screen()
-        print("\033[?25h", end="", flush=True)
-        print("\033[?1049l", end="", flush=True)
-        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+    def _guarded(self, target):
+        def run():
+            while self.run:
+                try:
+                    target()
+                    return
+                except Exception as error:  # pylint: disable=broad-exception-caught
+                    self.show_notification(f"{target.__name__} failed: {error!r}")
+                    time.sleep(1)
+
+        return run

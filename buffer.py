@@ -26,8 +26,11 @@ class Buffer:  # pylint: disable=R0902, R0904
         self.in_request = False
         self.queued = False
         self.cancel = False
+        self.pending_calls = []
+        self.tool_depth = 0
         self.updated = False
         self.pipe = os.pipe()
+        os.set_blocking(self.pipe[0], False)
 
         self.tokens = -1
         self.cond = threading.Condition()
@@ -49,6 +52,10 @@ class Buffer:  # pylint: disable=R0902, R0904
             self.chat_data["tools"] = [tool.dict for tool in toolchain.toolchain]
 
         self.add_msg("system")
+
+    def __del__(self):
+        for fd in self.pipe:
+            os.close(fd)
 
     @property
     def openai_data(self):
@@ -146,27 +153,31 @@ class Buffer:  # pylint: disable=R0902, R0904
 
     @top_k.setter
     def top_k(self, top_k):
-        if "options" in self.chat_data:
-            self.chat_data["options"]["top_k"] = top_k
-        self.chat_data["top_k"] = top_k
+        with self.cond:
+            if "options" in self.chat_data:
+                self.chat_data["options"]["top_k"] = top_k
+            self.chat_data["top_k"] = top_k
 
     @top_p.setter
     def top_p(self, top_p):
-        if "options" in self.chat_data:
-            self.chat_data["options"]["top_p"] = top_p
-        self.chat_data["top_p"] = top_p
+        with self.cond:
+            if "options" in self.chat_data:
+                self.chat_data["options"]["top_p"] = top_p
+            self.chat_data["top_p"] = top_p
 
     @temperature.setter
     def temperature(self, temperature):
-        if "options" in self.chat_data:
-            self.chat_data["options"]["temperature"] = temperature
-        self.chat_data["temperature"] = temperature
+        with self.cond:
+            if "options" in self.chat_data:
+                self.chat_data["options"]["temperature"] = temperature
+            self.chat_data["temperature"] = temperature
 
     @repeat_penalty.setter
     def repeat_penalty(self, repeat_penalty):
-        if "options" in self.chat_data:
-            self.chat_data["options"]["repeat_penalty"] = repeat_penalty
-        self.chat_data["repeat_penalty"] = repeat_penalty
+        with self.cond:
+            if "options" in self.chat_data:
+                self.chat_data["options"]["repeat_penalty"] = repeat_penalty
+            self.chat_data["repeat_penalty"] = repeat_penalty
 
     @ai_name.setter
     def ai_name(self, new_name):
@@ -194,11 +205,76 @@ class Buffer:  # pylint: disable=R0902, R0904
         self.notify()
 
     def cancel_request(self):
-        self.cancel = True
-        os.write(self.pipe[1], b"1")
+        with self.cond:
+            if not self.in_request:
+                return
+            self.cancel = True
+            os.write(self.pipe[1], b"1")
+
+    def clear_cancel(self):
+        with self.cond:
+            self.cancel = False
+            try:
+                while os.read(self.pipe[0], 64):
+                    pass
+            except BlockingIOError:
+                pass
+
+    @property
+    def awaiting_approval(self):
+        with self.cond:
+            return any(call["approved"] is None for call in self.pending_calls)
+
+    def set_pending(self, calls):
+        """calls: dicts with id, name, args, approved (None = undecided), result"""
+        with self.cond:
+            self.pending_calls = calls
+            self.updated = True
+            self.cond.notify()
+
+    def pending_resolved(self):
+        with self.cond:
+            return len(self.pending_calls) != 0 and not self.awaiting_approval
+
+    def decide(self, approved):
+        """settle the first undecided call, True when none are left undecided"""
+        with self.cond:
+            for call in self.pending_calls:
+                if call["approved"] is None:
+                    call["approved"] = approved
+                    break
+            self.updated = True
+            self.cond.notify()
+            return not self.awaiting_approval
+
+    def take_pending(self):
+        with self.cond:
+            calls = self.pending_calls
+            self.pending_calls = []
+            self.in_request = True
+            return calls
+
+    def abort_pending(self):
+        """decline everything that is still pending, True if there was any"""
+        with self.cond:
+            if not self.pending_calls or self.in_request:
+                return False
+            for call in self.pending_calls:
+                self.chat_data["messages"].append(
+                    {
+                        "role": "tool",
+                        "id": call["id"],
+                        "tool_name": call["name"],
+                        "content": call["result"] or "user declined call",
+                    }
+                )
+            self.pending_calls = []
+            self.add_msg("user")
+            return True
 
     def empty(self):
         with self.cond:
+            self.pending_calls = []
             self.chat_data["messages"] = []
             self.add_msg("system")
             self.updated = True
@@ -206,6 +282,7 @@ class Buffer:  # pylint: disable=R0902, R0904
 
     def del_msg(self, number=1):
         with self.cond:
+            self.pending_calls = []
             for _ in range(min(number, len(self.chat_data["messages"]))):
                 current_role = self.chat_data["messages"][-1]["role"]
                 initial_role = self.chat_data["messages"][-1]["role"]
@@ -226,7 +303,7 @@ class Buffer:  # pylint: disable=R0902, R0904
 
     def change_msg(self, role):
         with self.cond:
-            if self.in_request:
+            if self.in_request or self.pending_calls:
                 return
             if self.chat_data["messages"][-1]["content"] == "":
                 self.chat_data["messages"][-1]["role"] = role
@@ -239,13 +316,13 @@ class Buffer:  # pylint: disable=R0902, R0904
         with self.cond:
             last = self.chat_data["messages"][-1]
             return (
-                not (self.in_request or self.queued),
+                not (self.in_request or self.queued or self.pending_calls),
                 len(last.get("content", "")) == 0,
             )
 
     def add_open(self, ch):
         with self.cond:
-            if self.in_request:
+            if self.in_request or self.pending_calls:
                 return
             if self.chat_data["messages"][-1].get("role") in (
                 "user",
@@ -258,7 +335,7 @@ class Buffer:  # pylint: disable=R0902, R0904
 
     def del_open(self):
         with self.cond:
-            if self.in_request:
+            if self.in_request or self.pending_calls:
                 return
             if self.chat_data["messages"][-1].get("role") in (
                 "user",
@@ -337,6 +414,7 @@ class Buffer:  # pylint: disable=R0902, R0904
                 return
         with self.cond:
             self.chat_data = data
+            self.pending_calls = []
             self.updated = True
             self.cond.notify()
 
@@ -350,7 +428,7 @@ class Buffer:  # pylint: disable=R0902, R0904
         res = []
         res += [f"{self.normal_color}system:"]
         msg_ = self.chat_data["messages"][0]
-        if msg_["content"] == "":
+        if msg_["content"] == "" or width <= 0:
             res += [""]
         else:
             res_lines = msg_["content"].split("\n")
@@ -390,9 +468,40 @@ class Buffer:  # pylint: disable=R0902, R0904
             name = self.user_name if msg_["role"] == "user" else self.ai_name
             res += [f"{self.normal_color}{name}:"]
             res += text_to_lines(msg_["content"], width, color)
+        res += self._pending_lines(width)
         result.last = last
         result.lines = res
         return result
+
+    def _pending_lines(self, width):
+        warn = "\033[33m"
+        res = []
+        with self.cond:
+            total = len(self.pending_calls)
+            for number, call in enumerate(self.pending_calls, 1):
+                if call["approved"] is None:
+                    status = "approval required"
+                elif call["result"]:
+                    status = "rejected"
+                else:
+                    status = "approved" if call["approved"] else "declined"
+                res += text_to_lines(
+                    f"tool call {number} of {total}: {call['name']} ({status})",
+                    width,
+                    warn,
+                )
+                for key, value in call["args"].items():
+                    # ensure_ascii escapes control characters, no terminal tricks
+                    res += text_to_lines(
+                        f"  {key}: {json.dumps(value)}", width, self.normal_color
+                    )
+                if call["approved"] is None:
+                    break
+            if self.awaiting_approval:
+                res += text_to_lines(
+                    "[y] approve  [n] decline  [ctrl-c] decline all", width, warn
+                )
+        return res
 
     def get_string(self) -> str:
         res = ""

@@ -1,3 +1,4 @@
+import dataclasses
 import socket
 import os
 import re
@@ -5,21 +6,49 @@ import select
 import json
 
 from buffer import Buffer
-from dialog import Dialog
 import toolchain
+
+
+@dataclasses.dataclass
+class Model:
+    name: str
+    size_gb: int | None = None
+    parameter_size: str | None = None
+
+
+def _parse_models(data) -> list[Model]:
+    if not isinstance(data, dict):
+        return []
+    if isinstance(data.get("data"), list):  # openai api: names only
+        return [Model(name=model["id"]) for model in data["data"] if "id" in model]
+    if isinstance(data.get("models"), list):  # ollama api
+        parsed = []
+        for model in data["models"]:
+            if "name" not in model:
+                continue
+            size = model.get("size")
+            details = model.get("details") or {}
+            parsed.append(
+                Model(
+                    name=model["name"],
+                    size_gb=size // 1073741824 if size is not None else None,
+                    parameter_size=details.get("parameter_size"),
+                )
+            )
+        return parsed
+    return []
 
 
 class Requester:
     MAX_TOOL_DEPTH = 8
 
-    def __init__(self, host="127.0.0.1", port=11434, dialog=None, open_api=False):
+    def __init__(self, host="127.0.0.1", port=11434, open_api=False):
         self.max_recv = 1024
         self.connect_timeout = 5
         self.host = host
         self.port = port
-        self.dialog = dialog
         self.open_api = open_api
-        self._depth = 0
+        self.models_error: str | None = None
 
     def set_endpoint(self, endpoint) -> None:
         host, port = endpoint
@@ -45,7 +74,7 @@ class Requester:
     def _recv(self, socket_, read_fd=None, max_recv=None):
         r, _, _ = select.select([x for x in [socket_, read_fd] if x], [], [])
         if read_fd in r:
-            os.read(read_fd, 2)
+            os.read(read_fd, 64)
             return None
         data = socket_.recv(max_recv or self.max_recv)
         if not data:
@@ -112,27 +141,31 @@ class Requester:
         socket_.close()
         return ret
 
-    def get_models(self):
+    def get_models(self) -> list[Model]:
+        self.models_error = None
         try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(self.connect_timeout)
-            s.connect((self.host, self.port))
-            s.settimeout(None)
-            headers = [
-                f"GET {"/v1/models" if self.open_api else "/api/tags"} HTTP/1.1",
-                f"HOST: {self.host}",
-            ]
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(self.connect_timeout)
+                s.connect((self.host, self.port))
+                s.settimeout(None)
+                path = "/v1/models" if self.open_api else "/api/tags"
+                request = "\r\n".join(
+                    [
+                        f"GET {path} HTTP/1.1",
+                        f"HOST: {self.host}",
+                    ]
+                ) + "\r\n\r\n"
+                s.send(request.encode())
 
-            request = "\r\n".join(headers) + "\r\n\r\n"
-            s.send(request.encode())
+                raw = self._get_header(s)
 
-            raw = self._get_header(s)
-
-            if "content-type: application/jso" in raw[0].lower():
-                return self._handle_json(s, raw)
-            return {}
-        except (OSError, ValueError, IndexError, KeyError):
-            return {}
+                if "content-type: application/jso" not in raw[0].lower():
+                    self.models_error = f"unexpected response: {raw[0]}"
+                    return []
+                return _parse_models(self._handle_json(s, raw))
+        except (OSError, ValueError, IndexError, KeyError) as error:
+            self.models_error = str(error) or error.__class__.__name__
+            return []
 
     def _handle_tool_call(self, chat: Buffer, tcalls, collection=None):
         if collection is not None:
@@ -153,6 +186,7 @@ class Requester:
 
             return
         chat.add_ai_tool(tcalls)
+        pending = []
         for tool_call in tcalls:
             name = tool_call["function"]["name"]
             _args = tool_call["function"]["arguments"]
@@ -161,40 +195,52 @@ class Requester:
                     _args = json.loads(_args)
                 except (json.JSONDecodeError, TypeError):
                     _args = {}
-            _tool = next(
-                (__tool for __tool in toolchain.toolchain if __tool.name == name),
-                None,
+            if not isinstance(_args, dict):
+                _args = {}
+            known = self._find_tool(name) is not None
+            pending.append(
+                {
+                    "id": tool_call.get("id"),
+                    "name": name,
+                    "args": _args,
+                    "approved": None if known else False,
+                    "result": None if known else f"tool {name!r} does not exist",
+                }
             )
-            if _tool is None:
-                content = f"tool {name!r} does not exist"
-            else:
-                _reply = (
-                    self.dialog.ask(
-                        (
-                            f"function: {name}"
-                            f" arguments: {_args}"
-                        ),
-                        chat.cond,
-                    )
-                    if self.dialog
-                    else "\n"
-                )
-                if _reply != "\n":
+        chat.set_pending(pending)
+
+    @staticmethod
+    def _find_tool(name):
+        return next((tool for tool in toolchain.toolchain if tool.name == name), None)
+
+    def resume(self, chat: Buffer) -> str | None:
+        """run the approved pending tool calls, then continue the conversation"""
+        calls = chat.take_pending()
+        try:
+            for call in calls:
+                if call["result"] is not None:
+                    content = call["result"]
+                elif call["approved"] is not True:
                     content = "user declined call"
                 else:
                     try:
-                        content = _tool.function(**_args)
+                        content = self._find_tool(call["name"]).function(**call["args"])
                     except Exception as error:  # pylint: disable=broad-exception-caught
                         content = f"tool call failed: {error}"
+                with chat.cond:
+                    chat.chat_data["messages"].append(
+                        {
+                            "role": "tool",
+                            "id": call["id"],
+                            "tool_name": call["name"],
+                            "content": content,
+                        }
+                    )
+        except BaseException:
             with chat.cond:
-                chat.chat_data["messages"].append(
-                    {
-                        "role": "tool",
-                        "id": tool_call["id"],
-                        "tool_name": name,
-                        "content": content,
-                    }
-                )
+                chat.in_request = False
+            raise
+        return self.get_reply(chat, wrapped=True)
 
     def _handle_msg(
         self, chat: Buffer, body, tool_calls_collection=None
@@ -205,7 +251,7 @@ class Requester:
                 chat.add_ai(msg)
             if body["done"]:
                 chat.set_tokens(body["prompt_eval_count"] + body["eval_count"])
-            if "tool_calls" in body["message"]:
+            if body["message"].get("tool_calls"):
                 self._handle_tool_call(chat, body["message"]["tool_calls"])
                 return (body["done"], True)
             return (body["done"], False)
@@ -234,37 +280,31 @@ class Requester:
             return (done, tool_calls_collection is None)
         return (done, False)
 
-    def get_reply(self, chat: Buffer, wrapped=False) -> bool:
+    def get_reply(self, chat: Buffer, wrapped=False) -> str | None:
+        """request a reply, returns an error message when something went wrong"""
         call = False
-        chat.cancel = False
         with chat.cond:
             chat.in_request = True
+            if not wrapped:
+                chat.clear_cancel()
         try:
             if wrapped:
-                self._depth += 1
+                chat.tool_depth += 1
             else:
-                self._depth = 1
-            if self._depth > self.MAX_TOOL_DEPTH:
-                if self.dialog:
-                    self.dialog.set_text(
-                        "stopped: tool call chain exceeded "
-                        f"{self.MAX_TOOL_DEPTH} rounds"
-                    )
-                return False
-
-            r, _, _ = select.select([chat.pipe[0]], [], [], 0.5)
-            if r:
-                os.read(chat.pipe[0], 2)
+                chat.tool_depth = 1
+            if chat.tool_depth > self.MAX_TOOL_DEPTH:
+                chat.add_msg("user")
+                return f"stopped: tool call chain exceeded {self.MAX_TOOL_DEPTH} rounds"
 
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             s.settimeout(self.connect_timeout)
             s.connect((self.host, self.port))
             s.settimeout(None)
-            s.send(
-                self.make_post(
+            with chat.cond:
+                request = self.make_post(
                     chat.openai_data if self.open_api else chat.chat_data
-                ).encode()
-            )
+                )
+            s.send(request.encode())
 
             chat.add_msg("assistant")
             raw = self._get_header(s, chat.pipe[0])
@@ -272,12 +312,11 @@ class Requester:
                 s.close()
                 chat.add_msg("user")
                 chat.notify()
-                return False
+                return None
 
             if "HTTP/1.1 200 OK" not in raw[0]:
                 s.close()
-                self.dialog.set_text("\n".join(raw))
-                return True
+                return "\n".join(raw)
 
             if "content-type: application/x-ndjson" in raw[0].lower():
                 body = raw[1].splitlines()
@@ -371,13 +410,12 @@ class Requester:
                 _, call = self._handle_msg(chat, body)
             s.close()
             if call:
-                self.get_reply(chat, wrapped=True)
-            if not wrapped:
-                chat.add_msg("user")
-            return False
+                if chat.pending_resolved():  # nothing left to ask the user
+                    return self.resume(chat)
+                return None  # request ends here, user approval resumes it
+            chat.add_msg("user")
+            return None
         except (OSError, ValueError, json.JSONDecodeError, IndexError, KeyError) as error:
-            if not chat.cancel and self.dialog:
-                self.dialog.set_text(str(error))
             with chat.cond:
                 last = chat.chat_data["messages"][-1]
                 if (
@@ -388,7 +426,9 @@ class Requester:
                     chat.chat_data["messages"].pop()
                 chat.updated = True
                 chat.cond.notify()
-            return False
+            if chat.cancel:
+                return None
+            return f"{error.__class__.__name__}: {error}"
         finally:
             with chat.cond:
                 chat.in_request = False
