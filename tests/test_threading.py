@@ -3,6 +3,7 @@ import sys
 import threading
 import time
 import unittest
+from typing import Any
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -14,7 +15,7 @@ from supervisor import Queue, Supervisor
 from test_requester import _http_response, _serve_once
 
 
-def _make_supervisor():
+def _make_supervisor() -> Supervisor:
     with mock.patch.object(Requester, "get_models", return_value=[]), mock.patch(
         "supervisor.signal.signal"
     ):
@@ -24,7 +25,7 @@ def _make_supervisor():
 
 
 class TestRenderThread(unittest.TestCase):
-    def test_survives_rapid_buffer_switching(self):
+    def test_survives_rapid_buffer_switching(self) -> None:
         sv = _make_supervisor()
         sv.buffers.append(Buffer())
         sv.run = True
@@ -54,12 +55,12 @@ class TestRenderThread(unittest.TestCase):
         self.assertTrue(alive)
         self.assertFalse(render.is_alive())
 
-    def test_scroll_during_render_is_not_overwritten(self):
+    def test_scroll_during_render_is_not_overwritten(self) -> None:
         sv = _make_supervisor()
         sv.run = True
         sv.buffer_last = 0
 
-        def scrolling_draw(*args, **kwargs):
+        def scrolling_draw(*args: Any, **kwargs: Any) -> tuple[int, int]:
             sv.buffer_last = 7  # user scrolls while the screen is drawn
             return (10, 3)
 
@@ -79,7 +80,7 @@ class TestRenderThread(unittest.TestCase):
 
 
 class TestCancel(unittest.TestCase):
-    def test_idle_cancel_leaves_nothing_behind(self):
+    def test_idle_cancel_leaves_nothing_behind(self) -> None:
         chat = Buffer()
         for _ in range(5):
             chat.cancel_request()
@@ -87,7 +88,7 @@ class TestCancel(unittest.TestCase):
         with self.assertRaises(BlockingIOError):
             os.read(chat.pipe[0], 1)
 
-    def test_cancel_during_request_is_recorded_and_cleared(self):
+    def test_cancel_during_request_is_recorded_and_cleared(self) -> None:
         chat = Buffer()
         chat.in_request = True
         for _ in range(3):
@@ -98,7 +99,7 @@ class TestCancel(unittest.TestCase):
         with self.assertRaises(BlockingIOError):
             os.read(chat.pipe[0], 1)
 
-    def test_next_request_is_not_aborted_by_old_cancels(self):
+    def test_next_request_is_not_aborted_by_old_cancels(self) -> None:
         body = {
             "message": {"content": "hi"},
             "done": True,
@@ -114,7 +115,7 @@ class TestCancel(unittest.TestCase):
         self.assertIsNone(Requester(port=port).get_reply(chat))
         self.assertEqual(chat.chat_data["messages"][-2]["content"], "hi")
 
-    def test_request_has_no_startup_delay(self):
+    def test_request_has_no_startup_delay(self) -> None:
         body = {
             "message": {"content": "hi"},
             "done": True,
@@ -126,18 +127,18 @@ class TestCancel(unittest.TestCase):
         Requester(port=port).get_reply(Buffer())
         self.assertLess(time.time() - started, 0.4)
 
-    def test_pipe_is_closed_with_the_buffer(self):
+    def test_pipe_is_closed_with_the_buffer(self) -> None:
         chat = Buffer()
         read_fd, write_fd = chat.pipe
         chat.__del__()
         for fd in (read_fd, write_fd):
             with self.assertRaises(OSError):
                 os.fstat(fd)
-        chat.pipe = ()
+        chat.pipe = ()  # type: ignore[assignment]
 
 
 class TestQueue(unittest.TestCase):
-    def test_concurrent_schedule_enqueues_once(self):
+    def test_concurrent_schedule_enqueues_once(self) -> None:
         old_interval = sys.getswitchinterval()
         sys.setswitchinterval(1e-6)
         self.addCleanup(sys.setswitchinterval, old_interval)
@@ -146,7 +147,7 @@ class TestQueue(unittest.TestCase):
             chat = Buffer()
             barrier = threading.Barrier(8)
 
-            def schedule():
+            def schedule() -> None:
                 barrier.wait()
                 queue.schedule(chat)
 
@@ -159,7 +160,7 @@ class TestQueue(unittest.TestCase):
 
 
 class TestInput(unittest.TestCase):
-    def _feed(self, sv, data):
+    def _feed(self, sv: Supervisor, data: bytes) -> threading.Thread:
         read_fd, write_fd = os.pipe()
         os.write(write_fd, data)
         os.close(write_fd)
@@ -172,14 +173,14 @@ class TestInput(unittest.TestCase):
         os.close(read_fd)
         return thread
 
-    def test_multibyte_character_is_typed_not_fatal(self):
+    def test_multibyte_character_is_typed_not_fatal(self) -> None:
         sv = _make_supervisor()
         sv.run = True
         thread = self._feed(sv, "ä".encode())
         self.assertFalse(thread.is_alive())
         self.assertEqual(sv.current_data["messages"][-1]["content"], "ä")
 
-    def test_closed_stdin_stops_the_app(self):
+    def test_closed_stdin_stops_the_app(self) -> None:
         sv = _make_supervisor()
         sv.run = True
         thread = self._feed(sv, b"")
@@ -188,12 +189,12 @@ class TestInput(unittest.TestCase):
 
 
 class TestWatcher(unittest.TestCase):
-    def test_command_is_taken_atomically_and_cleared(self):
+    def test_command_is_taken_atomically_and_cleared(self) -> None:
         sv = _make_supervisor()
         sv.run = True
         seen = []
-        sv.process_command = lambda command: seen.append(command)
-        sv.update_command = lambda: None
+        sv.process_command = lambda command: seen.append(command)  # type: ignore
+        sv.update_command = lambda: None  # type: ignore[method-assign]
         with sv.input_cond:
             sv.command = "/n"
             sv.input_done = True
@@ -209,12 +210,12 @@ class TestWatcher(unittest.TestCase):
 
 
 class TestGuardedThreads(unittest.TestCase):
-    def test_failing_worker_is_reported_and_restarted(self):
+    def test_failing_worker_is_reported_and_restarted(self) -> None:
         sv = _make_supervisor()
         sv.run = True
         calls = []
 
-        def flaky():
+        def flaky() -> None:
             calls.append(1)
             if len(calls) == 1:
                 raise RuntimeError("boom")

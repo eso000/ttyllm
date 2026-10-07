@@ -9,12 +9,15 @@ import shutil
 import select
 import os
 import base64
+import types
+from collections.abc import Callable
 from glob import glob
 from enum import Enum
+from typing import Any
 
 from box_drawing import make_text_box, clean_screen, fit_text_to_box, fit_to_box
 from buffer import Buffer, ColorCodeException
-from requester import Requester
+from requester import Model, Requester
 
 
 class State(Enum):
@@ -26,11 +29,11 @@ class State(Enum):
 
 
 class Queue:
-    def __init__(self):
-        self.cond = threading.Condition()
-        self.qu = []
+    def __init__(self) -> None:
+        self.cond: threading.Condition = threading.Condition()
+        self.qu: list[Buffer] = []
 
-    def schedule(self, chat):
+    def schedule(self, chat: Buffer) -> None:
         with self.cond:
             if chat.queued or chat.in_request:
                 return
@@ -39,7 +42,7 @@ class Queue:
             self.cond.notify()
             chat.notify()
 
-    def deschedule(self, chat):
+    def deschedule(self, chat: Buffer) -> None:
         with self.cond:
             for index, scheduled_chat in enumerate(self.qu):
                 if scheduled_chat == chat:
@@ -49,7 +52,7 @@ class Queue:
                     return
 
     @property
-    def next(self):
+    def next(self) -> Buffer:
         with self.cond:
             chat = self.qu.pop(0)
             chat.queued = False
@@ -57,44 +60,44 @@ class Queue:
             return chat
 
     @property
-    def has_scheduled(self):
+    def has_scheduled(self) -> bool:
         with self.cond:
             return len(self.qu) != 0
 
 
 class Supervisor:
-    def __init__(self, open_api=False) -> None:
+    def __init__(self, open_api: bool = False) -> None:
 
-        self.open_api = open_api
+        self.open_api: bool = open_api
 
-        self.buffers = [Buffer()]
-        self.current_buffer_id = 0
-        self.notification = ""
-        self.requester = Requester(open_api=open_api)
+        self.buffers: list[Buffer] = [Buffer()]
+        self.current_buffer_id: int = 0
+        self.notification: str = ""
+        self.requester: Requester = Requester(open_api=open_api)
 
-        self.run = True
+        self.run: bool = True
 
-        self.command = ""
-        self.input_done = False
-        self.input_cond = threading.Condition()
-        self.buffer_last = -1
-        self.buffer_lines = -1
+        self.command: str = ""
+        self.input_done: bool = False
+        self.input_cond: threading.Condition = threading.Condition()
+        self.buffer_last: int = -1
+        self.buffer_lines: int = -1
 
-        self.queue = Queue()
+        self.queue: Queue = Queue()
 
         size = shutil.get_terminal_size()
-        self.columns = size.columns
-        self.lines = size.lines
-        self.state = State.NORMAL
+        self.columns: int = size.columns
+        self.lines: int = size.lines
+        self.state: State = State.NORMAL
         signal.signal(signal.SIGWINCH, self.handle_sigwinch)
 
-        self.models = []
-        self.models_list = []
-        self.models_short = ""
+        self.models: list[Model] = []
+        self.models_list: list[str] = []
+        self.models_short: str = ""
         self.load_models()
         self._report_models()
 
-        self.commands = {
+        self.commands: dict[str, Callable[..., None]] = {
             "m": self.list_models,
             "mr": self.refresh_models,
             "h": self.help,
@@ -123,31 +126,33 @@ class Supervisor:
         }
 
     @property
-    def current_buffer(self):
+    def current_buffer(self) -> Buffer:
         return self.buffers[self.current_buffer_id]
 
     @property
-    def current_data(self):
+    def current_data(self) -> dict[str, Any]:
         return self.current_buffer.chat_data
 
-    def show_notification(self, message):
+    def show_notification(self, message: str) -> None:
         """shown over the chat until the user presses a key"""
         self.notification = message
         self.buffer_last = 0
         self.current_buffer.notify()
 
-    def handle_sigint(self):
+    def handle_sigint(self) -> None:
         buffer = self.current_buffer
         self.queue.deschedule(buffer)
         if not buffer.abort_pending():
             buffer.cancel_request()
 
-    def decide_tool_call(self, approved):
+    def decide_tool_call(self, approved: bool) -> None:
         buffer = self.current_buffer
         if buffer.decide(approved):
             self.queue.schedule(buffer)
 
-    def handle_sigwinch(self, signum, frame):  # pylint: disable=unused-argument
+    def handle_sigwinch(
+        self, signum: int, frame: types.FrameType | None
+    ) -> None:  # pylint: disable=unused-argument
         size = shutil.get_terminal_size()
         self.columns = size.columns
         self.lines = size.lines
@@ -155,7 +160,7 @@ class Supervisor:
         self.update_command()
         self.current_buffer.notify()
 
-    def get_reply(self, buffer):
+    def get_reply(self, buffer: Buffer) -> None:
         if buffer.pending_resolved():
             error = self.requester.resume(buffer)
         else:
@@ -165,7 +170,7 @@ class Supervisor:
         else:
             self.current_buffer.notify()  # status line may list new approvals
 
-    def change_buffer(self, new_id):
+    def change_buffer(self, new_id: int) -> None:
         old_buffer = self.current_buffer
         self.current_buffer_id = new_id
         with old_buffer.cond:
@@ -175,7 +180,7 @@ class Supervisor:
             self.current_buffer.cond.notify()
 
     ############# internal commands
-    def load_models(self):
+    def load_models(self) -> None:
         self.models = self.requester.get_models()
         self.models_list = [model.name for model in self.models]
         self.models_short = "".join(
@@ -183,7 +188,7 @@ class Supervisor:
         )
 
     @staticmethod
-    def _format_model(model) -> str:
+    def _format_model(model: Model) -> str:
         if model.size_gb is None:  # openai api provides names only
             return f"{model.name}\n"
         return (
@@ -192,7 +197,7 @@ class Supervisor:
             f"\t{model.parameter_size}\n"
         )
 
-    def _models_problem(self):
+    def _models_problem(self) -> str | None:
         endpoint = f"{self.requester.host}:{self.requester.port}"
         if self.requester.models_error:
             return f"cannot reach {endpoint} - {self.requester.models_error}"
@@ -200,20 +205,20 @@ class Supervisor:
             return f"no models found on {endpoint}"
         return None
 
-    def _report_models(self):
+    def _report_models(self) -> bool:
         """notify about a failed or empty model list, True if there was a problem"""
         problem = self._models_problem()
         if problem:
             self.show_notification(problem)
         return problem is not None
 
-    def remove_image(self, *args):  # pylint: disable=unused-argument
+    def remove_image(self, *args: str) -> None:  # pylint: disable=unused-argument
         """remove images from current message"""
         with self.current_buffer.cond:
             if "images" in self.current_data["messages"][-1]:
                 self.current_data["messages"][-1].pop("images")
 
-    def add_image(self, *args):  # pylint: disable=unused-argument
+    def add_image(self, *args: str) -> None:  # pylint: disable=unused-argument
         """add image to message"""
         if len(args) < 1:
             return
@@ -233,7 +238,7 @@ class Supervisor:
         except FileNotFoundError:
             self.show_notification(f"File {args[0]} not found")
 
-    def list_models(self, *args):  # pylint: disable=unused-argument
+    def list_models(self, *args: str) -> None:  # pylint: disable=unused-argument
         """list all models"""
         with self.current_buffer.cond:
             self.buffer_last = 0
@@ -241,13 +246,13 @@ class Supervisor:
             self.current_buffer.updated = True
             self.current_buffer.cond.notify()
 
-    def refresh_models(self, *args):  # pylint: disable=unused-argument
+    def refresh_models(self, *args: str) -> None:  # pylint: disable=unused-argument
         """fetch the model list from the server again"""
         self.load_models()
         if not self._report_models():
             self.show_notification(f"loaded {len(self.models_list)} models")
 
-    def help(self, *args):  # pylint: disable=unused-argument
+    def help(self, *args: str) -> None:  # pylint: disable=unused-argument
         """show help"""
         with self.current_buffer.cond:
             self.buffer_last = 0
@@ -255,13 +260,13 @@ class Supervisor:
             self.current_buffer.updated = True
             self.current_buffer.cond.notify()
 
-    def _help_text(self):
+    def _help_text(self) -> str:
         lines = ["commands  (up/down: scroll, enter: back to chat)", ""]
         for name, function in self.commands.items():
             lines.append(f"{name}:\t{function.__doc__ or ''}")
         return "\n".join(lines)
 
-    def normal_view(self, *args):  # pylint: disable=unused-argument
+    def normal_view(self, *args: str) -> None:  # pylint: disable=unused-argument
         """show chat"""
         with self.current_buffer.cond:
             self.buffer_last = -1
@@ -269,7 +274,7 @@ class Supervisor:
             self.current_buffer.updated = True
             self.current_buffer.cond.notify()
 
-    def show_data(self, *args):  # pylint: disable=unused-argument
+    def show_data(self, *args: str) -> None:  # pylint: disable=unused-argument
         """show data"""
         with self.current_buffer.cond:
             self.buffer_last = 0
@@ -277,14 +282,14 @@ class Supervisor:
             self.current_buffer.updated = True
             self.current_buffer.cond.notify()
 
-    def show_system(self, *args):  # pylint: disable=unused-argument
+    def show_system(self, *args: str) -> None:  # pylint: disable=unused-argument
         """show system prompt"""
         with self.current_buffer.cond:
             self.state = State.SYSTEM
             self.current_buffer.updated = True
             self.current_buffer.cond.notify()
 
-    def split(self, *args):  # pylint: disable=unused-argument
+    def split(self, *args: str) -> None:  # pylint: disable=unused-argument
         """creates new buffer from current"""
         if self.current_buffer.pending_calls:
             self.show_notification("answer the pending tool calls before splitting")
@@ -297,40 +302,40 @@ class Supervisor:
         self.buffers.append(new)
         self.change_buffer(len(self.buffers) - 1)
 
-    def correct(self, *args):  # pylint: disable=unused-argument
+    def correct(self, *args: str) -> None:  # pylint: disable=unused-argument
         """removes last message"""
         self.current_buffer.del_msg(1)
 
-    def redo(self, *args):  # pylint: disable=unused-argument
+    def redo(self, *args: str) -> None:  # pylint: disable=unused-argument
         """regenerate last message"""
         self.current_buffer.del_msg(2)
         self.queue.schedule(self.current_buffer)
 
-    def start_over(self, *args):  # pylint: disable=unused-argument
+    def start_over(self, *args: str) -> None:  # pylint: disable=unused-argument
         """reset current buffer"""
         self.current_buffer.empty()
 
-    def undo(self, *args):  # pylint: disable=unused-argument
+    def undo(self, *args: str) -> None:  # pylint: disable=unused-argument
         """revert last user message"""
         self.current_buffer.del_msg(3)
         self.current_buffer.add_msg("user")
 
-    def create_buffer(self, *args):  # pylint: disable=unused-argument
+    def create_buffer(self, *args: str) -> None:  # pylint: disable=unused-argument
         """create new blank buffer"""
         self.buffers.append(Buffer())
         self.change_buffer(len(self.buffers) - 1)
 
-    def buffer_next(self, *args):  # pylint: disable=unused-argument
+    def buffer_next(self, *args: str) -> None:  # pylint: disable=unused-argument
         """switch to next buffer"""
         if self.current_buffer_id < len(self.buffers) - 1:
             self.change_buffer(self.current_buffer_id + 1)
 
-    def buffer_previous(self, *args):  # pylint: disable=unused-argument
+    def buffer_previous(self, *args: str) -> None:  # pylint: disable=unused-argument
         """switch to previous buffer"""
         if self.current_buffer_id > 0:
             self.change_buffer(self.current_buffer_id - 1)
 
-    def buffer_delete(self, *args):  # pylint: disable=unused-argument
+    def buffer_delete(self, *args: str) -> None:  # pylint: disable=unused-argument
         """delete current buffer"""
         old_buffer = self.current_buffer
         self.queue.deschedule(old_buffer)
@@ -344,7 +349,7 @@ class Supervisor:
             old_buffer.cond.notify()
         self.current_buffer.notify()
 
-    def switch_model(self, *args):
+    def switch_model(self, *args: str) -> None:
         """switch model -- argument: model name"""
         if len(args) < 1:
             return
@@ -352,19 +357,19 @@ class Supervisor:
             self.current_data["model"] = args[0]
         self.current_buffer.notify()
 
-    def change_ai(self, *args):  # pylint: disable=unused-argument
+    def change_ai(self, *args: str) -> None:  # pylint: disable=unused-argument
         """change current message to assistant"""
         self.current_buffer.change_msg("assistant")
 
-    def change_user(self, *args):  # pylint: disable=unused-argument
+    def change_user(self, *args: str) -> None:  # pylint: disable=unused-argument
         """change current message to user"""
         self.current_buffer.change_msg("user")
 
-    def change_system(self, *args):  # pylint: disable=unused-argument
+    def change_system(self, *args: str) -> None:  # pylint: disable=unused-argument
         """change current message to system"""
         self.current_buffer.change_msg("system")
 
-    def import_chat(self, *args):
+    def import_chat(self, *args: str) -> None:
         """import chat from file -- argument: file name"""
         if len(args) < 1:
             return
@@ -380,7 +385,7 @@ class Supervisor:
         except FileNotFoundError:
             self.show_notification(f"File {args[0]} not found")
 
-    def export_chat(self, *args):
+    def export_chat(self, *args: str) -> None:
         """export chat from file -- argument: file name"""
         if len(args) < 1:
             return
@@ -400,7 +405,7 @@ class Supervisor:
         except FileNotFoundError:
             self.show_notification(f"File {args[0]} not found")
 
-    def options(self, *args):
+    def options(self, *args: str) -> None:
         """show or set options -- arguments: k|p|t|pen|stream value"""
         if len(args) == 0:
             self.show_notification(json.dumps(self.current_buffer.options, indent=3))
@@ -421,7 +426,7 @@ class Supervisor:
                 case _:
                     self.show_notification(f"command {args[0]} not found")
 
-    def visual(self, *args):
+    def visual(self, *args: str) -> None:
         """show or set looks -- arguments: un|an|uc|ac|nc value"""
         if len(args) == 0:
             self.show_notification(
@@ -447,18 +452,18 @@ class Supervisor:
             except ColorCodeException:
                 self.show_notification(f"invalid color code :{args[1]}")
 
-    def process_command(self, command) -> bool:
-        command = command.split(" ")
-        if command[0][0] not in (":", "/"):
+    def process_command(self, command: str) -> bool:
+        parts = command.split(" ")
+        if parts[0][0] not in (":", "/"):
             return True
-        command[0] = command[0][1:]
-        if command[0] == "q":
+        parts[0] = parts[0][1:]
+        if parts[0] == "q":
             return False
-        if command[0] in self.commands:
-            self.commands[command[0]](*command[1:])
+        if parts[0] in self.commands:
+            self.commands[parts[0]](*parts[1:])
         return True
 
-    def handle_new_message(self):
+    def handle_new_message(self) -> None:
         buffer = self.current_buffer
         with buffer.cond:
             last = buffer.chat_data["messages"][-1]
@@ -470,7 +475,7 @@ class Supervisor:
             buffer.cond.notify()
         self.queue.schedule(buffer)
 
-    def queue_manager(self):
+    def queue_manager(self) -> None:
         while self.run:
             with self.queue.cond:
                 while not self.queue.has_scheduled and self.run:
@@ -480,7 +485,7 @@ class Supervisor:
                 chat = self.queue.next
             self.get_reply(chat)
 
-    def watcher(self):
+    def watcher(self) -> None:
         while self.run:
             with self.input_cond:
                 while not self.input_done and self.run:
@@ -495,10 +500,10 @@ class Supervisor:
             else:
                 self.handle_new_message()
 
-    def _handle_escape_sequence(self):
+    def _handle_escape_sequence(self) -> None:
         fd = sys.stdin.fileno()
         buffer = ""
-        ch = 27
+        ch: int | str = 27
         r, _, _ = select.select([fd], [], [], 0.0)
         if len(r) == 0:
             return
@@ -530,7 +535,7 @@ class Supervisor:
             self.current_buffer.updated = True
             self.current_buffer.cond.notify()
 
-    def update_command(self):
+    def update_command(self) -> None:
         if self.command == "":
             waiting = [
                 str(number)
@@ -557,12 +562,12 @@ class Supervisor:
                 self.command, self.columns, 1, self.lines, 1, "\033[32m", "\033[41m"
             )
 
-    def _auto_complete(self):
+    def _auto_complete(self) -> None:
         if self.command != "":
             command_tokens = self.command.split(" ")
             if len(command_tokens) < 2:
                 return
-            possible_completions = []
+            possible_completions: list[str] = []
             match command_tokens[0]:
                 case ":sm" | "/sm":
                     possible_completions = [
@@ -570,7 +575,7 @@ class Supervisor:
                     ]
                 case ":e" | "/e" | ":i" | "/i" | ":image" | "/image":
 
-                    def _dir_completion(path):
+                    def _dir_completion(path: str) -> str:
                         if not os.path.isdir(path):
                             return path
                         if path[-1] == "/":
@@ -596,7 +601,7 @@ class Supervisor:
             self.command += common_prefix[len(command_tokens[1]) :]
             self.update_command()
 
-    def stop(self):
+    def stop(self) -> None:
         self.run = False
         for buffer in self.buffers:
             buffer.cancel_request()
@@ -607,7 +612,7 @@ class Supervisor:
         with self.input_cond:
             self.input_cond.notify()
 
-    def get_input(self):
+    def get_input(self) -> None:
         fd = sys.stdin.fileno()
         decoder = codecs.getincrementaldecoder("utf-8")("replace")
         while self.run:
@@ -712,7 +717,7 @@ class Supervisor:
                     else:
                         continue
 
-    def update_buffer(self):
+    def update_buffer(self) -> None:
         while self.run:
             buffer = self.current_buffer
             with buffer.cond:
@@ -790,8 +795,8 @@ class Supervisor:
             print("\033[?1049l", end="", flush=True)
             termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
-    def _guarded(self, target):
-        def run():
+    def _guarded(self, target: Callable[[], None]) -> Callable[[], None]:
+        def run() -> None:
             while self.run:
                 try:
                     target()

@@ -1,4 +1,5 @@
 import dataclasses
+from typing import Any, Callable
 
 
 @dataclasses.dataclass
@@ -9,19 +10,25 @@ class Parameter:
     required: bool = False
 
     @property
-    def dict(self):
+    def dict(self) -> dict[str, Any]:
         return {"type": self.type, "description": self.description}
 
 
 class Tool:
-    def __init__(self, name, function, description, parameters):
+    def __init__(
+        self,
+        name: str,
+        function: Callable[..., Any],
+        description: str,
+        parameters: list[Parameter],
+    ) -> None:
         self.name = name
         self.function = function
         self.description = description
         self.parameters = parameters
 
     @property
-    def dict(self):
+    def dict(self) -> dict[str, Any]:
         return {
             "type": "function",
             "function": {

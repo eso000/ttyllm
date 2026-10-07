@@ -6,14 +6,14 @@ _print_lock = threading.Lock()
 
 @dataclasses.dataclass
 class TextBox:
-    lines: list = dataclasses.field(default_factory=list)
-    last = -1
+    lines: list[str] = dataclasses.field(default_factory=list)
+    last: int = -1
 
 
-def text_to_lines(text, width, color=""):
+def text_to_lines(text: str, width: int, color: str = "") -> list[str]:
     if text == "" or width <= 0:
         return [""]
-    res = []
+    res: list[str] = []
     res_lines = text.replace("\t", "   ").split("\n")
     for line in res_lines:
         if len(line) <= width:
@@ -47,7 +47,7 @@ def clean_screen() -> None:
         print("\033[H\033[J\033[3J", end="", flush=True)
 
 
-def make_text_box(text, width, last=-1, color="") -> TextBox:
+def make_text_box(text: str, width: int, last: int = -1, color: str = "") -> TextBox:
     res = TextBox()
     res.last = last
     res.lines = text_to_lines(text, width, color)
@@ -55,8 +55,14 @@ def make_text_box(text, width, last=-1, color="") -> TextBox:
 
 
 def fit_to_box(
-    box, width, height, start_x=1, start_y=1, background="", hide_cursor=False
-):
+    box: TextBox,
+    width: int,
+    height: int,
+    start_x: int = 1,
+    start_y: int = 1,
+    background: str = "",
+    hide_cursor: bool = False,
+) -> tuple[int, int]:
     with _print_lock:
         # for x in range(height):
 
@@ -100,15 +106,15 @@ def fit_to_box(
 
 
 def fit_text_to_box(
-    text,
-    width,
-    height,
-    start_x=1,
-    start_y=1,
-    color="",
-    background="",
-    hide_cursor=False,
-):
+    text: str,
+    width: int,
+    height: int,
+    start_x: int = 1,
+    start_y: int = 1,
+    color: str = "",
+    background: str = "",
+    hide_cursor: bool = False,
+) -> tuple[int, int]:
     return fit_to_box(
         make_text_box(text, width, color=color),
         width,

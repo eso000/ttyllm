@@ -4,8 +4,10 @@ import os
 import re
 import select
 import json
+from typing import Any
 
 from buffer import Buffer
+from tool import Tool
 import toolchain
 
 
@@ -16,13 +18,13 @@ class Model:
     parameter_size: str | None = None
 
 
-def _parse_models(data) -> list[Model]:
+def _parse_models(data: Any) -> list[Model]:
     if not isinstance(data, dict):
         return []
     if isinstance(data.get("data"), list):  # openai api: names only
         return [Model(name=model["id"]) for model in data["data"] if "id" in model]
     if isinstance(data.get("models"), list):  # ollama api
-        parsed = []
+        parsed: list[Model] = []
         for model in data["models"]:
             if "name" not in model:
                 continue
@@ -40,22 +42,24 @@ def _parse_models(data) -> list[Model]:
 
 
 class Requester:
-    MAX_TOOL_DEPTH = 8
+    MAX_TOOL_DEPTH: int = 8
 
-    def __init__(self, host="127.0.0.1", port=11434, open_api=False):
-        self.max_recv = 1024
-        self.connect_timeout = 5
-        self.host = host
-        self.port = port
-        self.open_api = open_api
+    def __init__(
+        self, host: str = "127.0.0.1", port: int = 11434, open_api: bool = False
+    ) -> None:
+        self.max_recv: int = 1024
+        self.connect_timeout: int = 5
+        self.host: str = host
+        self.port: int = port
+        self.open_api: bool = open_api
         self.models_error: str | None = None
 
-    def set_endpoint(self, endpoint) -> None:
+    def set_endpoint(self, endpoint: tuple[str, int]) -> None:
         host, port = endpoint
         self.host = host
         self.port = port
 
-    def make_post(self, d) -> str:
+    def make_post(self, d: dict[str, Any]) -> str:
         body = json.dumps(d)
         headers = [
             (
@@ -71,7 +75,9 @@ class Requester:
         request = "\r\n".join(headers) + "\r\n\r\n" + body
         return request
 
-    def _recv(self, socket_, read_fd=None, max_recv=None):
+    def _recv(
+        self, socket_: socket.socket, read_fd: int | None = None, max_recv: int | None = None
+    ) -> bytes | None:
         r, _, _ = select.select([x for x in [socket_, read_fd] if x], [], [])
         if read_fd in r:
             os.read(read_fd, 64)
@@ -81,7 +87,9 @@ class Requester:
             raise ConnectionError("connection closed by server")
         return data
 
-    def _get_header(self, socket_, read_fd=None):
+    def _get_header(
+        self, socket_: socket.socket, read_fd: int | None = None
+    ) -> list[str] | None:
         reply = self._recv(socket_, read_fd)
         if reply is None:
             return None
@@ -95,7 +103,7 @@ class Requester:
             raw.append("")
         return raw
 
-    def _get_all(self, final, size, socket_):
+    def _get_all(self, final: bytes, size: int, socket_: socket.socket) -> bytes:
         while len(final) < size:
             data = self._recv(
                 socket_, max_recv=min(self.max_recv, size - len(final))
@@ -105,7 +113,7 @@ class Requester:
             final += data
         return final
 
-    def _handle_json(self, socket_, existing):
+    def _handle_json(self, socket_: socket.socket, existing: list[str]) -> Any:
         body = existing[1].encode()
         if "Transfer-Encoding: chunked" in existing[0]:
             full = bytearray()
@@ -158,6 +166,8 @@ class Requester:
                 s.send(request.encode())
 
                 raw = self._get_header(s)
+                if raw is None:
+                    raise ConnectionError("response cancelled")
 
                 if "content-type: application/jso" not in raw[0].lower():
                     self.models_error = f"unexpected response: {raw[0]}"
@@ -167,7 +177,12 @@ class Requester:
             self.models_error = str(error) or error.__class__.__name__
             return []
 
-    def _handle_tool_call(self, chat: Buffer, tcalls, collection=None):
+    def _handle_tool_call(
+        self,
+        chat: Buffer,
+        tcalls: list[dict[str, Any]],
+        collection: dict[Any, dict[str, Any]] | None = None,
+    ) -> None:
         if collection is not None:
             _id = tcalls[0].get("id", None)
             _index = tcalls[0].get("index", None)
@@ -186,7 +201,7 @@ class Requester:
 
             return
         chat.add_ai_tool(tcalls)
-        pending = []
+        pending: list[dict[str, Any]] = []
         for tool_call in tcalls:
             name = tool_call["function"]["name"]
             _args = tool_call["function"]["arguments"]
@@ -210,7 +225,7 @@ class Requester:
         chat.set_pending(pending)
 
     @staticmethod
-    def _find_tool(name):
+    def _find_tool(name: str) -> Tool | None:
         return next((tool for tool in toolchain.toolchain if tool.name == name), None)
 
     def resume(self, chat: Buffer) -> str | None:
@@ -224,7 +239,10 @@ class Requester:
                     content = "user declined call"
                 else:
                     try:
-                        content = self._find_tool(call["name"]).function(**call["args"])
+                        tool = self._find_tool(call["name"])
+                        if tool is None:
+                            raise LookupError(f"tool {call['name']!r} does not exist")
+                        content = tool.function(**call["args"])
                     except Exception as error:  # pylint: disable=broad-exception-caught
                         content = f"tool call failed: {error}"
                 with chat.cond:
@@ -243,7 +261,10 @@ class Requester:
         return self.get_reply(chat, wrapped=True)
 
     def _handle_msg(
-        self, chat: Buffer, body, tool_calls_collection=None
+        self,
+        chat: Buffer,
+        body: Any,
+        tool_calls_collection: dict[Any, dict[str, Any]] | None = None,
     ) -> tuple[bool, bool]:
         if "message" in body:  # ollama api
             msg = body["message"]["content"]
@@ -280,7 +301,7 @@ class Requester:
             return (done, tool_calls_collection is None)
         return (done, False)
 
-    def get_reply(self, chat: Buffer, wrapped=False) -> str | None:
+    def get_reply(self, chat: Buffer, wrapped: bool = False) -> str | None:
         """request a reply, returns an error message when something went wrong"""
         call = False
         with chat.cond:
@@ -354,7 +375,7 @@ class Requester:
             if "content-type: text/event-stream" in raw[0].lower():
                 body = raw[1].splitlines()
                 done = False
-                tool_calls_collection = {}
+                tool_calls_collection: dict[Any, dict[str, Any]] = {}
                 while not done and not chat.cancel:
                     body = [x for x in body if x != ""]
 

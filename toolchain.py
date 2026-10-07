@@ -1,15 +1,16 @@
 import subprocess
+
 from tool import Tool, Parameter
 
-toolchain = []
+toolchain: list[Tool] = []
 
 
-def read_file(file_path):
+def read_file(file_path: str) -> str:
     with open(file_path, "r") as file:
         return file.read()
 
 
-def execute_shell_command(command):
+def execute_shell_command(command: str) -> str:
     return subprocess.run([command], shell=True, capture_output=True, text=True).stdout
 
 

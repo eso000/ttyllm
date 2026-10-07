@@ -2,6 +2,7 @@ import re
 import os
 import json
 import threading
+from typing import Any
 
 from box_drawing import TextBox, text_to_lines, make_text_box
 import toolchain
@@ -12,30 +13,30 @@ class ColorCodeException(Exception):
 
 
 class Buffer:  # pylint: disable=R0902, R0904
-    TOOLS = False
-    OLLAMA = True
+    TOOLS: bool = False
+    OLLAMA: bool = True
 
-    def __init__(self):
-        self.visual_data = {
+    def __init__(self) -> None:
+        self.visual_data: dict[str, str] = {
             "ai_name": "AI",
             "user_name": "You",
             "ai_color": "\033[35m",
             "user_color": "\033[36m",
             "normal_color": "\033[37m",
         }
-        self.in_request = False
-        self.queued = False
-        self.cancel = False
-        self.pending_calls = []
-        self.tool_depth = 0
-        self.updated = False
-        self.pipe = os.pipe()
+        self.in_request: bool = False
+        self.queued: bool = False
+        self.cancel: bool = False
+        self.pending_calls: list[dict[str, Any]] = []
+        self.tool_depth: int = 0
+        self.updated: bool = False
+        self.pipe: tuple[int, int] = os.pipe()
         os.set_blocking(self.pipe[0], False)
 
-        self.tokens = -1
-        self.cond = threading.Condition()
+        self.tokens: int = -1
+        self.cond: threading.Condition = threading.Condition()
 
-        self.chat_data = {
+        self.chat_data: dict[str, Any] = {
             "model": "llama3.2",  # mistral-nemo",
             "stream": True,
             "think": False,
@@ -53,15 +54,15 @@ class Buffer:  # pylint: disable=R0902, R0904
 
         self.add_msg("system")
 
-    def __del__(self):
+    def __del__(self) -> None:
         for fd in self.pipe:
             os.close(fd)
 
     @property
-    def openai_data(self):
+    def openai_data(self) -> dict[str, Any]:
 
-        def to_open_ai_msg(m):
-            non_text_content = []
+        def to_open_ai_msg(m: dict[str, Any]) -> Any:
+            non_text_content: list[dict[str, Any]] = []
             if "images" in m:
                 for img in m["images"]:
                     non_text_content.append(
@@ -77,7 +78,7 @@ class Buffer:  # pylint: disable=R0902, R0904
                 return non_text_content
             return m["content"]
 
-        data = {
+        data: dict[str, Any] = {
             "model": self.chat_data["model"],
             "stream": self.chat_data["stream"],
             "think": self.chat_data["think"],
@@ -97,27 +98,52 @@ class Buffer:  # pylint: disable=R0902, R0904
         return data
 
     @property
-    def ai_name(self):
+    def ai_name(self) -> str:
         return self.visual_data["ai_name"]
 
+    @ai_name.setter
+    def ai_name(self, new_name: str) -> None:
+        self.visual_data["ai_name"] = new_name
+        self.notify()
+
     @property
-    def user_name(self):
+    def user_name(self) -> str:
         return self.visual_data["user_name"]
 
+    @user_name.setter
+    def user_name(self, new_name: str) -> None:
+        self.visual_data["user_name"] = new_name
+        self.notify()
+
     @property
-    def ai_color(self):
+    def ai_color(self) -> str:
         return self.visual_data["ai_color"]
 
+    @ai_color.setter
+    def ai_color(self, new_color: str) -> None:
+        self.visual_data["ai_color"] = self._process_color(new_color)
+        self.notify()
+
     @property
-    def user_color(self):
+    def user_color(self) -> str:
         return self.visual_data["user_color"]
 
-    @property
-    def normal_color(self):
-        return self.visual_data["normal_color"]
+    @user_color.setter
+    def user_color(self, new_color: str) -> None:
+        self.visual_data["user_color"] = self._process_color(new_color)
+        self.notify()
 
     @property
-    def options(self):
+    def normal_color(self) -> str:
+        return self.visual_data["normal_color"]
+
+    @normal_color.setter
+    def normal_color(self, new_color: str) -> None:
+        self.visual_data["normal_color"] = self._process_color(new_color)
+        self.notify()
+
+    @property
+    def options(self) -> dict[str, Any]:
         if "options" in self.chat_data:
             return self.chat_data["options"]
         return {
@@ -128,90 +154,65 @@ class Buffer:  # pylint: disable=R0902, R0904
         }
 
     @property
-    def top_k(self):
+    def top_k(self) -> Any:
         if "options" in self.chat_data:
             return self.chat_data["options"].get("top_k", 0)
         return self.chat_data.get("top_k", 0)
 
-    @property
-    def top_p(self):
-        if "options" in self.chat_data:
-            return self.chat_data["options"].get("top_p", 0)
-        return self.chat_data.get("top_p", 0)
-
-    @property
-    def temperature(self):
-        if "options" in self.chat_data:
-            return self.chat_data["options"].get("temperature", 0)
-        return self.chat_data.get("temperature", 0)
-
-    @property
-    def repeat_penalty(self):
-        if "options" in self.chat_data:
-            return self.chat_data["options"].get("repeat_penalty", 0)
-        return self.chat_data.get("frequency_penalty", 0)
-
     @top_k.setter
-    def top_k(self, top_k):
+    def top_k(self, top_k: Any) -> None:
         with self.cond:
             if "options" in self.chat_data:
                 self.chat_data["options"]["top_k"] = top_k
             self.chat_data["top_k"] = top_k
 
+    @property
+    def top_p(self) -> Any:
+        if "options" in self.chat_data:
+            return self.chat_data["options"].get("top_p", 0)
+        return self.chat_data.get("top_p", 0)
+
     @top_p.setter
-    def top_p(self, top_p):
+    def top_p(self, top_p: Any) -> None:
         with self.cond:
             if "options" in self.chat_data:
                 self.chat_data["options"]["top_p"] = top_p
             self.chat_data["top_p"] = top_p
 
+    @property
+    def temperature(self) -> Any:
+        if "options" in self.chat_data:
+            return self.chat_data["options"].get("temperature", 0)
+        return self.chat_data.get("temperature", 0)
+
     @temperature.setter
-    def temperature(self, temperature):
+    def temperature(self, temperature: Any) -> None:
         with self.cond:
             if "options" in self.chat_data:
                 self.chat_data["options"]["temperature"] = temperature
             self.chat_data["temperature"] = temperature
 
+    @property
+    def repeat_penalty(self) -> Any:
+        if "options" in self.chat_data:
+            return self.chat_data["options"].get("repeat_penalty", 0)
+        return self.chat_data.get("frequency_penalty", 0)
+
     @repeat_penalty.setter
-    def repeat_penalty(self, repeat_penalty):
+    def repeat_penalty(self, repeat_penalty: Any) -> None:
         with self.cond:
             if "options" in self.chat_data:
                 self.chat_data["options"]["repeat_penalty"] = repeat_penalty
             self.chat_data["repeat_penalty"] = repeat_penalty
 
-    @ai_name.setter
-    def ai_name(self, new_name):
-        self.visual_data["ai_name"] = new_name
-        self.notify()
-
-    @user_name.setter
-    def user_name(self, new_name):
-        self.visual_data["user_name"] = new_name
-        self.notify()
-
-    @ai_color.setter
-    def ai_color(self, new_color):
-        self.visual_data["ai_color"] = self._process_color(new_color)
-        self.notify()
-
-    @user_color.setter
-    def user_color(self, new_color):
-        self.visual_data["user_color"] = self._process_color(new_color)
-        self.notify()
-
-    @normal_color.setter
-    def normal_color(self, new_color):
-        self.visual_data["normal_color"] = self._process_color(new_color)
-        self.notify()
-
-    def cancel_request(self):
+    def cancel_request(self) -> None:
         with self.cond:
             if not self.in_request:
                 return
             self.cancel = True
             os.write(self.pipe[1], b"1")
 
-    def clear_cancel(self):
+    def clear_cancel(self) -> None:
         with self.cond:
             self.cancel = False
             try:
@@ -221,22 +222,22 @@ class Buffer:  # pylint: disable=R0902, R0904
                 pass
 
     @property
-    def awaiting_approval(self):
+    def awaiting_approval(self) -> bool:
         with self.cond:
             return any(call["approved"] is None for call in self.pending_calls)
 
-    def set_pending(self, calls):
+    def set_pending(self, calls: list[dict[str, Any]]) -> None:
         """calls: dicts with id, name, args, approved (None = undecided), result"""
         with self.cond:
             self.pending_calls = calls
             self.updated = True
             self.cond.notify()
 
-    def pending_resolved(self):
+    def pending_resolved(self) -> bool:
         with self.cond:
             return len(self.pending_calls) != 0 and not self.awaiting_approval
 
-    def decide(self, approved):
+    def decide(self, approved: bool) -> bool:
         """settle the first undecided call, True when none are left undecided"""
         with self.cond:
             for call in self.pending_calls:
@@ -247,14 +248,14 @@ class Buffer:  # pylint: disable=R0902, R0904
             self.cond.notify()
             return not self.awaiting_approval
 
-    def take_pending(self):
+    def take_pending(self) -> list[dict[str, Any]]:
         with self.cond:
             calls = self.pending_calls
             self.pending_calls = []
             self.in_request = True
             return calls
 
-    def abort_pending(self):
+    def abort_pending(self) -> bool:
         """decline everything that is still pending, True if there was any"""
         with self.cond:
             if not self.pending_calls or self.in_request:
@@ -272,7 +273,7 @@ class Buffer:  # pylint: disable=R0902, R0904
             self.add_msg("user")
             return True
 
-    def empty(self):
+    def empty(self) -> None:
         with self.cond:
             self.pending_calls = []
             self.chat_data["messages"] = []
@@ -280,7 +281,7 @@ class Buffer:  # pylint: disable=R0902, R0904
             self.updated = True
             self.cond.notify()
 
-    def del_msg(self, number=1):
+    def del_msg(self, number: int = 1) -> None:
         with self.cond:
             self.pending_calls = []
             for _ in range(min(number, len(self.chat_data["messages"]))):
@@ -295,13 +296,13 @@ class Buffer:  # pylint: disable=R0902, R0904
             self.updated = True
             self.cond.notify()
 
-    def add_msg(self, role):
+    def add_msg(self, role: str) -> None:
         with self.cond:
             self.chat_data["messages"].append({"role": role, "content": ""})
             self.updated = True
             self.cond.notify()
 
-    def change_msg(self, role):
+    def change_msg(self, role: str) -> None:
         with self.cond:
             if self.in_request or self.pending_calls:
                 return
@@ -312,7 +313,7 @@ class Buffer:  # pylint: disable=R0902, R0904
             self.updated = True
             self.cond.notify()
 
-    def currently_typed(self):
+    def currently_typed(self) -> tuple[bool, bool]:
         with self.cond:
             last = self.chat_data["messages"][-1]
             return (
@@ -320,7 +321,7 @@ class Buffer:  # pylint: disable=R0902, R0904
                 len(last.get("content", "")) == 0,
             )
 
-    def add_open(self, ch):
+    def add_open(self, ch: str) -> None:
         with self.cond:
             if self.in_request or self.pending_calls:
                 return
@@ -333,7 +334,7 @@ class Buffer:  # pylint: disable=R0902, R0904
                 self.updated = True
                 self.cond.notify()
 
-    def del_open(self):
+    def del_open(self) -> None:
         with self.cond:
             if self.in_request or self.pending_calls:
                 return
@@ -348,19 +349,19 @@ class Buffer:  # pylint: disable=R0902, R0904
             self.updated = True
             self.cond.notify()
 
-    def clear_msg(self):
+    def clear_msg(self) -> None:
         with self.cond:
             self.chat_data["messages"][-1]["content"] = ""
             self.updated = True
             self.cond.notify()
 
-    def add_ai_tool(self, tool_calls):
+    def add_ai_tool(self, tool_calls: list[dict[str, Any]]) -> None:
         with self.cond:
             if self.in_request:
                 if self.chat_data["messages"][-1].get("role") == "assistant":
                     self.chat_data["messages"][-1]["tool_calls"] = tool_calls
 
-    def add_ai(self, ch):
+    def add_ai(self, ch: str) -> None:
         with self.cond:
             if self.in_request:
                 if self.chat_data["messages"][-1].get("role") == "assistant":
@@ -389,8 +390,8 @@ class Buffer:  # pylint: disable=R0902, R0904
     def set_user_color(self, value: str) -> None:
         self.user_color = self._process_color(value)
 
-    def set_data(self, data):
-        def _check_dict(_dict, _key, _instance):
+    def set_data(self, data: dict[str, Any]) -> None:
+        def _check_dict(_dict: dict[str, Any], _key: str, _instance: type) -> bool:
             if _key not in _dict:
                 return True
             if not isinstance(_dict[_key], _instance):
@@ -418,14 +419,14 @@ class Buffer:  # pylint: disable=R0902, R0904
             self.updated = True
             self.cond.notify()
 
-    def notify(self):
+    def notify(self) -> None:
         with self.cond:
             self.updated = True
             self.cond.notify()
 
-    def get_text_box_system(self, width, last=-1) -> str:
+    def get_text_box_system(self, width: int, last: int = -1) -> TextBox:
         result = TextBox()
-        res = []
+        res: list[str] = []
         res += [f"{self.normal_color}system:"]
         msg_ = self.chat_data["messages"][0]
         if msg_["content"] == "" or width <= 0:
@@ -444,12 +445,12 @@ class Buffer:  # pylint: disable=R0902, R0904
         result.lines = res
         return result
 
-    def get_text_box_data(self, width, last=-1) -> str:
+    def get_text_box_data(self, width: int, last: int = -1) -> TextBox:
         return make_text_box(json.dumps(self.chat_data, indent=4), width, last=last)
 
-    def get_text_box(self, width, last=-1) -> str:
+    def get_text_box(self, width: int, last: int = -1) -> TextBox:
         result = TextBox()
-        res = []
+        res: list[str] = []
         if (
             len(self.chat_data["messages"]) == 1
             and self.chat_data["messages"][0]["role"] == "system"
@@ -473,9 +474,9 @@ class Buffer:  # pylint: disable=R0902, R0904
         result.lines = res
         return result
 
-    def _pending_lines(self, width):
+    def _pending_lines(self, width: int) -> list[str]:
         warn = "\033[33m"
-        res = []
+        res: list[str] = []
         with self.cond:
             total = len(self.pending_calls)
             for number, call in enumerate(self.pending_calls, 1):
@@ -514,13 +515,13 @@ class Buffer:  # pylint: disable=R0902, R0904
                 res += f"{self.ai_color}{msg_["content"]}\n"
         return res
 
-    def estimate_tokens(self):
+    def estimate_tokens(self) -> int:
         with self.cond:
             estimate = 0
             for msg in self.chat_data["messages"]:
                 estimate += len(msg.get("content", ""))
         return int(estimate / 4)
 
-    def set_tokens(self, tokens):
+    def set_tokens(self, tokens: int) -> None:
         with self.cond:
             self.tokens = tokens
