@@ -13,12 +13,14 @@ import toolchain
 
 @dataclasses.dataclass
 class Model:
+    """a model as reported by the server"""
     name: str
     size_gb: int | None = None
     parameter_size: str | None = None
 
 
 def _parse_models(data: Any) -> list[Model]:
+    """parse the model list out of an Ollama or OpenAI API response"""
     if not isinstance(data, dict):
         return []
     if isinstance(data.get("data"), list):  # openai api: names only
@@ -42,11 +44,13 @@ def _parse_models(data: Any) -> list[Model]:
 
 
 class Requester:
+    """raw socket HTTP client for the Ollama and OpenAI chat APIs"""
     MAX_TOOL_DEPTH: int = 8
 
     def __init__(
         self, host: str = "127.0.0.1", port: int = 11434, open_api: bool = False
     ) -> None:
+        """configure the client for host and port, open_api selects the OpenAI wire format"""
         self.max_recv: int = 1024
         self.connect_timeout: int = 5
         self.host: str = host
@@ -55,11 +59,13 @@ class Requester:
         self.models_error: str | None = None
 
     def set_endpoint(self, endpoint: tuple[str, int]) -> None:
+        """point the client at a different host and port"""
         host, port = endpoint
         self.host = host
         self.port = port
 
     def make_post(self, d: dict[str, Any]) -> str:
+        """assemble a raw HTTP/1.1 POST request with a JSON body"""
         body = json.dumps(d)
         headers = [
             (
@@ -78,6 +84,7 @@ class Requester:
     def _recv(
         self, socket_: socket.socket, read_fd: int | None = None, max_recv: int | None = None
     ) -> bytes | None:
+        """receive data, or return None when the cancel pipe fires instead"""
         r, _, _ = select.select([x for x in [socket_, read_fd] if x], [], [])
         if read_fd in r:
             os.read(read_fd, 64)
@@ -90,6 +97,7 @@ class Requester:
     def _get_header(
         self, socket_: socket.socket, read_fd: int | None = None
     ) -> list[str] | None:
+        """read up to the header terminator, returns headers and body or None on cancel"""
         reply = self._recv(socket_, read_fd)
         if reply is None:
             return None
@@ -104,6 +112,7 @@ class Requester:
         return raw
 
     def _get_all(self, final: bytes, size: int, socket_: socket.socket) -> bytes:
+        """keep receiving until size bytes have arrived"""
         while len(final) < size:
             data = self._recv(
                 socket_, max_recv=min(self.max_recv, size - len(final))
@@ -114,6 +123,7 @@ class Requester:
         return final
 
     def _handle_json(self, socket_: socket.socket, existing: list[str]) -> Any:
+        """read a whole JSON body, decoding chunked or content-length framing"""
         body = existing[1].encode()
         if "Transfer-Encoding: chunked" in existing[0]:
             full = bytearray()
@@ -150,6 +160,7 @@ class Requester:
         return ret
 
     def get_models(self) -> list[Model]:
+        """fetch the model list, errors are remembered in models_error"""
         self.models_error = None
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -183,6 +194,7 @@ class Requester:
         tcalls: list[dict[str, Any]],
         collection: dict[Any, dict[str, Any]] | None = None,
     ) -> None:
+        """collect streamed tool call fragments, or queue complete calls for approval"""
         if collection is not None:
             _id = tcalls[0].get("id", None)
             _index = tcalls[0].get("index", None)
@@ -226,6 +238,7 @@ class Requester:
 
     @staticmethod
     def _find_tool(name: str) -> Tool | None:
+        """look up a registered tool by name"""
         return next((tool for tool in toolchain.toolchain if tool.name == name), None)
 
     def resume(self, chat: Buffer) -> str | None:
@@ -266,6 +279,7 @@ class Requester:
         body: Any,
         tool_calls_collection: dict[Any, dict[str, Any]] | None = None,
     ) -> tuple[bool, bool]:
+        """apply one streamed frame to the chat, returns done and whether a tool call arrived"""
         if "message" in body:  # ollama api
             msg = body["message"]["content"]
             if msg is not None:

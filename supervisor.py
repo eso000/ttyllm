@@ -21,6 +21,7 @@ from requester import Model, Requester
 
 
 class State(Enum):
+    """which view is currently displayed"""
     NORMAL = 0
     SYSTEM = 1
     DATA = 2
@@ -29,11 +30,14 @@ class State(Enum):
 
 
 class Queue:
+    """serialises reply requests, one buffer at a time"""
     def __init__(self) -> None:
+        """create an empty queue"""
         self.cond: threading.Condition = threading.Condition()
         self.qu: list[Buffer] = []
 
     def schedule(self, chat: Buffer) -> None:
+        """add a chat to the queue unless it is already queued or running"""
         with self.cond:
             if chat.queued or chat.in_request:
                 return
@@ -43,6 +47,7 @@ class Queue:
             chat.notify()
 
     def deschedule(self, chat: Buffer) -> None:
+        """remove a chat from the queue"""
         with self.cond:
             for index, scheduled_chat in enumerate(self.qu):
                 if scheduled_chat == chat:
@@ -53,6 +58,7 @@ class Queue:
 
     @property
     def next(self) -> Buffer:
+        """pop the oldest queued chat"""
         with self.cond:
             chat = self.qu.pop(0)
             chat.queued = False
@@ -61,13 +67,16 @@ class Queue:
 
     @property
     def has_scheduled(self) -> bool:
+        """True when at least one chat waits for a reply"""
         with self.cond:
             return len(self.qu) != 0
 
 
 class Supervisor:
+    """owns the buffers, threads and terminal, and drives the whole chat"""
     def __init__(self, open_api: bool = False) -> None:
 
+        """set up buffers, commands, request queue and the model list"""
         self.open_api: bool = open_api
 
         self.buffers: list[Buffer] = [Buffer()]
@@ -127,10 +136,12 @@ class Supervisor:
 
     @property
     def current_buffer(self) -> Buffer:
+        """the buffer currently shown"""
         return self.buffers[self.current_buffer_id]
 
     @property
     def current_data(self) -> dict[str, Any]:
+        """chat data of the buffer currently shown"""
         return self.current_buffer.chat_data
 
     def show_notification(self, message: str) -> None:
@@ -140,12 +151,14 @@ class Supervisor:
         self.current_buffer.notify()
 
     def handle_sigint(self) -> None:
+        """decline pending tool calls or cancel the running request"""
         buffer = self.current_buffer
         self.queue.deschedule(buffer)
         if not buffer.abort_pending():
             buffer.cancel_request()
 
     def decide_tool_call(self, approved: bool) -> None:
+        """answer a pending tool call and resume the chat once all are settled"""
         buffer = self.current_buffer
         if buffer.decide(approved):
             self.queue.schedule(buffer)
@@ -153,6 +166,7 @@ class Supervisor:
     def handle_sigwinch(
         self, signum: int, frame: types.FrameType | None
     ) -> None:  # pylint: disable=unused-argument
+        """re-read the terminal size and redraw after a resize"""
         size = shutil.get_terminal_size()
         self.columns = size.columns
         self.lines = size.lines
@@ -161,6 +175,7 @@ class Supervisor:
         self.current_buffer.notify()
 
     def get_reply(self, buffer: Buffer) -> None:
+        """run a request for the buffer and surface errors as a notification"""
         if buffer.pending_resolved():
             error = self.requester.resume(buffer)
         else:
@@ -171,6 +186,7 @@ class Supervisor:
             self.current_buffer.notify()  # status line may list new approvals
 
     def change_buffer(self, new_id: int) -> None:
+        """switch to another buffer and wake both views"""
         old_buffer = self.current_buffer
         self.current_buffer_id = new_id
         with old_buffer.cond:
@@ -181,6 +197,7 @@ class Supervisor:
 
     ############# internal commands
     def load_models(self) -> None:
+        """refresh the model list and its display text"""
         self.models = self.requester.get_models()
         self.models_list = [model.name for model in self.models]
         self.models_short = "".join(
@@ -189,6 +206,7 @@ class Supervisor:
 
     @staticmethod
     def _format_model(model: Model) -> str:
+        """one line of the model list, with size and parameters when known"""
         if model.size_gb is None:  # openai api provides names only
             return f"{model.name}\n"
         return (
@@ -198,6 +216,7 @@ class Supervisor:
         )
 
     def _models_problem(self) -> str | None:
+        """describe why the model list is unusable, None when it is fine"""
         endpoint = f"{self.requester.host}:{self.requester.port}"
         if self.requester.models_error:
             return f"cannot reach {endpoint} - {self.requester.models_error}"
@@ -261,6 +280,7 @@ class Supervisor:
             self.current_buffer.cond.notify()
 
     def _help_text(self) -> str:
+        """build the help screen from the command docstrings"""
         lines = ["commands  (up/down: scroll, enter: back to chat)", ""]
         for name, function in self.commands.items():
             lines.append(f"{name}:\t{function.__doc__ or ''}")
@@ -453,6 +473,7 @@ class Supervisor:
                 self.show_notification(f"invalid color code :{args[1]}")
 
     def process_command(self, command: str) -> bool:
+        """run a slash or colon command, False when the user wants to quit"""
         parts = command.split(" ")
         if parts[0][0] not in (":", "/"):
             return True
@@ -464,6 +485,7 @@ class Supervisor:
         return True
 
     def handle_new_message(self) -> None:
+        """schedule the current buffer after the user submitted a message"""
         buffer = self.current_buffer
         with buffer.cond:
             last = buffer.chat_data["messages"][-1]
@@ -476,6 +498,7 @@ class Supervisor:
         self.queue.schedule(buffer)
 
     def queue_manager(self) -> None:
+        """worker thread: pull queued chats and request their replies"""
         while self.run:
             with self.queue.cond:
                 while not self.queue.has_scheduled and self.run:
@@ -486,6 +509,7 @@ class Supervisor:
             self.get_reply(chat)
 
     def watcher(self) -> None:
+        """worker thread: dispatch submitted input to commands or to the chat"""
         while self.run:
             with self.input_cond:
                 while not self.input_done and self.run:
@@ -501,6 +525,7 @@ class Supervisor:
                 self.handle_new_message()
 
     def _handle_escape_sequence(self) -> None:
+        """read the rest of an escape sequence and scroll with the arrow keys"""
         fd = sys.stdin.fileno()
         buffer = ""
         ch: int | str = 27
@@ -536,6 +561,7 @@ class Supervisor:
             self.current_buffer.cond.notify()
 
     def update_command(self) -> None:
+        """draw the status line, or the command line while a command is typed"""
         if self.command == "":
             waiting = [
                 str(number)
@@ -563,6 +589,7 @@ class Supervisor:
             )
 
     def _auto_complete(self) -> None:
+        """complete model names and file paths when tab is pressed"""
         if self.command != "":
             command_tokens = self.command.split(" ")
             if len(command_tokens) < 2:
@@ -576,6 +603,7 @@ class Supervisor:
                 case ":e" | "/e" | ":i" | "/i" | ":image" | "/image":
 
                     def _dir_completion(path: str) -> str:
+                        """append a slash so directories complete to a prefix"""
                         if not os.path.isdir(path):
                             return path
                         if path[-1] == "/":
@@ -602,6 +630,7 @@ class Supervisor:
             self.update_command()
 
     def stop(self) -> None:
+        """end the chat: cancel requests and wake every waiting thread"""
         self.run = False
         for buffer in self.buffers:
             buffer.cancel_request()
@@ -613,6 +642,7 @@ class Supervisor:
             self.input_cond.notify()
 
     def get_input(self) -> None:
+        """input thread: turn raw keystrokes into commands, edits and approvals"""
         fd = sys.stdin.fileno()
         decoder = codecs.getincrementaldecoder("utf-8")("replace")
         while self.run:
@@ -718,6 +748,7 @@ class Supervisor:
                         continue
 
     def update_buffer(self) -> None:
+        """render thread: redraw the view whenever the buffer changes"""
         while self.run:
             buffer = self.current_buffer
             with buffer.cond:
@@ -766,6 +797,7 @@ class Supervisor:
                     self.buffer_last = new_last
 
     def run_chat(self) -> None:
+        """set up the terminal, run the worker threads and restore the terminal on exit"""
         print("\033[?1049h", end="", flush=True)
         clean_screen()
         self.run = True
@@ -796,7 +828,9 @@ class Supervisor:
             termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
     def _guarded(self, target: Callable[[], None]) -> Callable[[], None]:
+        """wrap a thread target so an error notifies instead of killing the thread"""
         def run() -> None:
+            """call the target, restarting it after errors until the chat stops"""
             while self.run:
                 try:
                     target()

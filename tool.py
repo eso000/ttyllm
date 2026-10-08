@@ -4,6 +4,7 @@ from typing import Any, Callable
 
 @dataclasses.dataclass
 class Parameter:
+    """one argument of a tool function"""
     name: str
     type: str
     description: str
@@ -11,10 +12,12 @@ class Parameter:
 
     @property
     def dict(self) -> dict[str, Any]:
+        """JSON schema fragment describing this parameter"""
         return {"type": self.type, "description": self.description}
 
 
 class Tool:
+    """a callable exposed to the model, with schema metadata"""
     def __init__(
         self,
         name: str,
@@ -22,6 +25,7 @@ class Tool:
         description: str,
         parameters: list[Parameter],
     ) -> None:
+        """store the name, implementation, description and parameters"""
         self.name = name
         self.function = function
         self.description = description
@@ -29,6 +33,7 @@ class Tool:
 
     @property
     def dict(self) -> dict[str, Any]:
+        """full tool definition in the OpenAI function calling format"""
         return {
             "type": "function",
             "function": {

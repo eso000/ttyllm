@@ -6,11 +6,13 @@ _print_lock = threading.Lock()
 
 @dataclasses.dataclass
 class TextBox:
+    """a block of wrapped lines together with a scroll offset"""
     lines: list[str] = dataclasses.field(default_factory=list)
     last: int = -1
 
 
 def text_to_lines(text: str, width: int, color: str = "") -> list[str]:
+    """wrap text into lines of at most width characters, breaking at spaces, each prefixed with color"""
     if text == "" or width <= 0:
         return [""]
     res: list[str] = []
@@ -43,11 +45,13 @@ def text_to_lines(text: str, width: int, color: str = "") -> list[str]:
 
 
 def clean_screen() -> None:
+    """clear the screen, the scrollback and park the cursor"""
     with _print_lock:
         print("\033[H\033[J\033[3J", end="", flush=True)
 
 
 def make_text_box(text: str, width: int, last: int = -1, color: str = "") -> TextBox:
+    """wrap text into a TextBox of the given width"""
     res = TextBox()
     res.last = last
     res.lines = text_to_lines(text, width, color)
@@ -63,6 +67,7 @@ def fit_to_box(
     background: str = "",
     hide_cursor: bool = False,
 ) -> tuple[int, int]:
+    """draw a TextBox inside a width x height region at the given offset, scrolling to last"""
     with _print_lock:
         # for x in range(height):
 
@@ -115,6 +120,7 @@ def fit_text_to_box(
     background: str = "",
     hide_cursor: bool = False,
 ) -> tuple[int, int]:
+    """wrap text into a box and draw it in one call"""
     return fit_to_box(
         make_text_box(text, width, color=color),
         width,

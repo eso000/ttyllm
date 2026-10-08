@@ -6,11 +6,13 @@ toolchain: list[Tool] = []
 
 
 def read_file(file_path: str) -> str:
+    """return the contents of a file"""
     with open(file_path, "r") as file:
         return file.read()
 
 
 def execute_shell_command(command: str) -> str:
+    """run a shell command and return its stdout"""
     return subprocess.run([command], shell=True, capture_output=True, text=True).stdout
 
 
