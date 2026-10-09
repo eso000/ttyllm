@@ -1,5 +1,4 @@
 import codecs
-import json
 import sys
 import threading
 import time
@@ -7,27 +6,18 @@ import signal
 import shutil
 import select
 import os
-import base64
 import types
 from collections.abc import Callable
 from glob import glob
-from enum import Enum
 from typing import Any
 
 from box_drawing import make_text_box, clean_screen, fit_text_to_box, fit_to_box
-from buffer import Buffer, ColorCodeException
+from buffer import Buffer
+from commands import Commands
 from request_queue import RequestQueue
 from requester import Model, Requester
+from state import State
 from terminal import raw_terminal
-
-
-class State(Enum):
-    """which view is currently displayed"""
-    NORMAL = 0
-    SYSTEM = 1
-    DATA = 2
-    HELP = 3
-    MODELS = 4
 
 
 class Supervisor:
@@ -62,35 +52,9 @@ class Supervisor:
         self.models_list: list[str] = []
         self.models_short: str = ""
         self.load_models()
-        self._report_models()
+        self.report_models()
 
-        self.commands: dict[str, Callable[..., None]] = {
-            "m": self.list_models,
-            "mr": self.refresh_models,
-            "h": self.help,
-            "n": self.normal_view,
-            "d": self.show_data,
-            "S": self.show_system,
-            "s": self.split,
-            "r": self.redo,
-            "R": self.start_over,
-            "rr": self.undo,
-            "bc": self.create_buffer,
-            "bn": self.buffer_next,
-            "bp": self.buffer_previous,
-            "bd": self.buffer_delete,
-            "sm": self.switch_model,
-            "ai": self.change_ai,
-            "us": self.change_user,
-            "sys": self.change_system,
-            "i": self.import_chat,
-            "e": self.export_chat,
-            "v": self.visual,
-            "o": self.options,
-            "image": self.add_image,
-            "rmi": self.remove_image,
-            "-": self.correct,
-        }
+        self.commands: Commands = Commands(self)
 
     @property
     def current_buffer(self) -> Buffer:
@@ -182,265 +146,16 @@ class Supervisor:
             return f"no models found on {endpoint}"
         return None
 
-    def _report_models(self) -> bool:
+    def report_models(self) -> bool:
         """notify about a failed or empty model list, True if there was a problem"""
         problem = self._models_problem()
         if problem:
             self.show_notification(problem)
         return problem is not None
 
-    def remove_image(self, *args: str) -> None:  # pylint: disable=unused-argument
-        """remove images from current message"""
-        with self.current_buffer.cond:
-            if "images" in self.current_data["messages"][-1]:
-                self.current_data["messages"][-1].pop("images")
-
-    def add_image(self, *args: str) -> None:  # pylint: disable=unused-argument
-        """add image to message"""
-        if len(args) < 1:
-            return
-        if self.current_data["messages"][-1]["role"] != "user":
-            return
-
-        try:
-            with open(args[0], "rb") as file:
-                img = base64.b64encode(file.read()).decode("utf-8")
-            with self.current_buffer.cond:
-                if "images" not in self.current_data["messages"][-1]:
-                    self.current_data["messages"][-1]["images"] = []
-                self.current_data["messages"][-1]["images"].append(img)
-
-        except PermissionError:
-            self.show_notification(f"insufficient permissions for {args[0]}")
-        except FileNotFoundError:
-            self.show_notification(f"File {args[0]} not found")
-
-    def list_models(self, *args: str) -> None:  # pylint: disable=unused-argument
-        """list all models"""
-        with self.current_buffer.cond:
-            self.buffer_last = 0
-            self.state = State.MODELS
-            self.current_buffer.updated = True
-            self.current_buffer.cond.notify()
-
-    def refresh_models(self, *args: str) -> None:  # pylint: disable=unused-argument
-        """fetch the model list from the server again"""
-        self.load_models()
-        if not self._report_models():
-            self.show_notification(f"loaded {len(self.models_list)} models")
-
-    def help(self, *args: str) -> None:  # pylint: disable=unused-argument
-        """show help"""
-        with self.current_buffer.cond:
-            self.buffer_last = 0
-            self.state = State.HELP
-            self.current_buffer.updated = True
-            self.current_buffer.cond.notify()
-
-    def _help_text(self) -> str:
-        """build the help screen from the command docstrings"""
-        lines = ["commands  (up/down: scroll, enter: back to chat)", ""]
-        for name, function in self.commands.items():
-            lines.append(f"{name}:\t{function.__doc__ or ''}")
-        return "\n".join(lines)
-
-    def normal_view(self, *args: str) -> None:  # pylint: disable=unused-argument
-        """show chat"""
-        with self.current_buffer.cond:
-            self.buffer_last = -1
-            self.state = State.NORMAL
-            self.current_buffer.updated = True
-            self.current_buffer.cond.notify()
-
-    def show_data(self, *args: str) -> None:  # pylint: disable=unused-argument
-        """show data"""
-        with self.current_buffer.cond:
-            self.buffer_last = 0
-            self.state = State.DATA
-            self.current_buffer.updated = True
-            self.current_buffer.cond.notify()
-
-    def show_system(self, *args: str) -> None:  # pylint: disable=unused-argument
-        """show system prompt"""
-        with self.current_buffer.cond:
-            self.state = State.SYSTEM
-            self.current_buffer.updated = True
-            self.current_buffer.cond.notify()
-
-    def split(self, *args: str) -> None:  # pylint: disable=unused-argument
-        """creates new buffer from current"""
-        if self.current_buffer.pending_calls:
-            self.show_notification("answer the pending tool calls before splitting")
-            return
-        new = Buffer()
-        with self.current_buffer.cond:
-            new.chat_data = json.loads(json.dumps(self.current_data))
-            new.visual_data = json.loads(json.dumps(self.current_buffer.visual_data))
-            new.tokens = self.current_buffer.tokens
-        self.buffers.append(new)
-        self.change_buffer(len(self.buffers) - 1)
-
-    def correct(self, *args: str) -> None:  # pylint: disable=unused-argument
-        """removes last message"""
-        self.current_buffer.del_msg(1)
-
-    def redo(self, *args: str) -> None:  # pylint: disable=unused-argument
-        """regenerate last message"""
-        self.current_buffer.del_msg(2)
-        self.queue.schedule(self.current_buffer)
-
-    def start_over(self, *args: str) -> None:  # pylint: disable=unused-argument
-        """reset current buffer"""
-        self.current_buffer.empty()
-
-    def undo(self, *args: str) -> None:  # pylint: disable=unused-argument
-        """revert last user message"""
-        self.current_buffer.del_msg(3)
-        self.current_buffer.add_msg("user")
-
-    def create_buffer(self, *args: str) -> None:  # pylint: disable=unused-argument
-        """create new blank buffer"""
-        self.buffers.append(Buffer())
-        self.change_buffer(len(self.buffers) - 1)
-
-    def buffer_next(self, *args: str) -> None:  # pylint: disable=unused-argument
-        """switch to next buffer"""
-        if self.current_buffer_id < len(self.buffers) - 1:
-            self.change_buffer(self.current_buffer_id + 1)
-
-    def buffer_previous(self, *args: str) -> None:  # pylint: disable=unused-argument
-        """switch to previous buffer"""
-        if self.current_buffer_id > 0:
-            self.change_buffer(self.current_buffer_id - 1)
-
-    def buffer_delete(self, *args: str) -> None:  # pylint: disable=unused-argument
-        """delete current buffer"""
-        old_buffer = self.current_buffer
-        self.queue.deschedule(old_buffer)
-        old_buffer.abort_pending()
-        self.buffers.pop(self.current_buffer_id)
-        if len(self.buffers) == 0:
-            self.buffers.append(Buffer())
-        if self.current_buffer_id == len(self.buffers):
-            self.current_buffer_id -= 1
-        with old_buffer.cond:
-            old_buffer.cond.notify()
-        self.current_buffer.notify()
-
-    def switch_model(self, *args: str) -> None:
-        """switch model -- argument: model name"""
-        if len(args) < 1:
-            return
-        with self.current_buffer.cond:
-            self.current_data["model"] = args[0]
-        self.current_buffer.notify()
-
-    def change_ai(self, *args: str) -> None:  # pylint: disable=unused-argument
-        """change current message to assistant"""
-        self.current_buffer.change_msg("assistant")
-
-    def change_user(self, *args: str) -> None:  # pylint: disable=unused-argument
-        """change current message to user"""
-        self.current_buffer.change_msg("user")
-
-    def change_system(self, *args: str) -> None:  # pylint: disable=unused-argument
-        """change current message to system"""
-        self.current_buffer.change_msg("system")
-
-    def import_chat(self, *args: str) -> None:
-        """import chat from file -- argument: file name"""
-        if len(args) < 1:
-            return
-        try:
-            with open(args[0], "r", encoding="utf-8") as file:
-                try:
-                    data = json.load(file)
-                    self.current_buffer.set_data(data)
-                except json.JSONDecodeError:
-                    self.show_notification(f"File {args[0]} is corrupted")
-        except PermissionError:
-            self.show_notification(f"insufficient permissions for {args[0]}")
-        except FileNotFoundError:
-            self.show_notification(f"File {args[0]} not found")
-
-    def export_chat(self, *args: str) -> None:
-        """export chat from file -- argument: file name"""
-        if len(args) < 1:
-            return
-        with self.current_buffer.cond:
-            data = json.dumps(
-                {
-                    "visual": self.current_buffer.visual_data,
-                    "chat": self.current_data,
-                },
-                indent=4,
-            )
-        try:
-            with open(args[0], "w", encoding="utf-8") as file:
-                file.write(data)
-        except PermissionError:
-            self.show_notification(f"insufficient permissions for {args[0]}")
-        except FileNotFoundError:
-            self.show_notification(f"File {args[0]} not found")
-
-    def options(self, *args: str) -> None:
-        """show or set options -- arguments: k|p|t|pen|stream value"""
-        if len(args) == 0:
-            self.show_notification(json.dumps(self.current_buffer.options, indent=3))
-        elif len(args) == 1:
-            self.show_notification("no data provided")
-        else:
-            match args[0]:
-                case "k":
-                    self.current_buffer.top_k = float(args[1])
-                case "p":
-                    self.current_buffer.top_p = float(args[1])
-                case "t":
-                    self.current_buffer.temperature = int(args[1])
-                case "pen":
-                    self.current_buffer.repeat_penalty = float(args[1])
-                case "stream":
-                    self.current_data["stream"] = int(args[1]) & 1 == 1
-                case _:
-                    self.show_notification(f"command {args[0]} not found")
-
-    def visual(self, *args: str) -> None:
-        """show or set looks -- arguments: un|an|uc|ac|nc value"""
-        if len(args) == 0:
-            self.show_notification(
-                json.dumps(self.current_buffer.visual_data, indent=3)
-            )
-        elif len(args) == 1:
-            self.show_notification("no data provided")
-        else:
-            try:
-                match args[0]:
-                    case "un":
-                        self.current_buffer.user_name = args[1]
-                    case "an":
-                        self.current_buffer.ai_name = args[1]
-                    case "uc":
-                        self.current_buffer.user_color = args[1]
-                    case "ac":
-                        self.current_buffer.ai_color = args[1]
-                    case "nc":
-                        self.current_buffer.normal_color = args[1]
-                    case _:
-                        self.show_notification(f"command {args[0]} not found")
-            except ColorCodeException:
-                self.show_notification(f"invalid color code :{args[1]}")
-
     def process_command(self, command: str) -> bool:
         """run a slash or colon command, False when the user wants to quit"""
-        parts = command.split(" ")
-        if parts[0][0] not in (":", "/"):
-            return True
-        parts[0] = parts[0][1:]
-        if parts[0] == "q":
-            return False
-        if parts[0] in self.commands:
-            self.commands[parts[0]](*parts[1:])
-        return True
+        return self.commands.execute(command)
 
     def handle_new_message(self) -> None:
         """schedule the current buffer after the user submitted a message"""
@@ -626,19 +341,19 @@ class Supervisor:
             with self.input_cond:
                 match ord(ch):
                     case 19:
-                        self.split()
+                        self.commands.split()
                     case 2:
-                        self.create_buffer()
+                        self.commands.create_buffer()
                     case 4:
-                        self.buffer_delete()
+                        self.commands.buffer_delete()
                     case 14:
-                        self.buffer_next()
+                        self.commands.buffer_next()
                     case 16:
-                        self.buffer_previous()
+                        self.commands.buffer_previous()
                     case 18:
-                        self.redo()
+                        self.commands.redo()
                     case 5:
-                        self.undo()
+                        self.commands.undo()
                     case 17:
                         if self.command == "":
                             self.command = "/"
@@ -733,7 +448,9 @@ class Supervisor:
                         box = buffer.get_text_box_data(self.columns - 4, last)
                         hide_cursor = True
                     case State.HELP:
-                        box = make_text_box(self._help_text(), self.columns - 4, last)
+                        box = make_text_box(
+                            self.commands.help_text(), self.columns - 4, last
+                        )
                         hide_cursor = True
                     case State.MODELS:
                         box = make_text_box(

@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import requester
 from requester import Model, Requester, _parse_models
+from commands import Commands
 from supervisor import Supervisor
 from buffer import Buffer
 
@@ -452,17 +453,17 @@ class TestNotification(unittest.TestCase):
 
     def test_unreachable_server_is_reported(self) -> None:
         self.supervisor.requester.models_error = "refused"
-        self.assertTrue(self.supervisor._report_models())
+        self.assertTrue(self.supervisor.report_models())
         self.assertIn("cannot reach", self.supervisor.notification)
         self.assertIn("refused", self.supervisor.notification)
 
     def test_no_models_is_reported(self) -> None:
-        self.assertTrue(self.supervisor._report_models())
+        self.assertTrue(self.supervisor.report_models())
         self.assertIn("no models found", self.supervisor.notification)
 
     def test_models_present_stays_silent(self) -> None:
         self.supervisor.models_list = ["llama3.2"]
-        self.assertFalse(self.supervisor._report_models())
+        self.assertFalse(self.supervisor.report_models())
         self.assertEqual(self.supervisor.notification, "")
 
     def test_reply_error_becomes_notification(self) -> None:
@@ -485,30 +486,29 @@ class TestHelp(unittest.TestCase):
         self.supervisor.notification = ""
         self.supervisor.buffer_last = -1
         self.supervisor.state = None  # type: ignore[assignment]
-        self.supervisor.commands = {}
-        for name in ("help", "switch_model", "remove_image"):
-            self.supervisor.commands[name] = getattr(Supervisor, name).__get__(
-                self.supervisor
-            )
+        self.commands = Commands(self.supervisor)
 
     def test_help_is_a_scrollable_view_not_a_notification(self) -> None:
-        self.supervisor.help()
+        self.commands.execute(":h")
         self.assertEqual(self.supervisor.state.name, "HELP")
         self.assertEqual(self.supervisor.buffer_last, 0)
         self.assertEqual(self.supervisor.notification, "")
 
     def test_help_lists_every_command_with_a_description(self) -> None:
-        text = self.supervisor._help_text()
-        for name in self.supervisor.commands:
+        text = self.commands.help_text()
+        for name in self.commands.table:
             self.assertIn(f"{name}:", text)
         self.assertNotIn("None", text)
 
     def test_every_real_command_is_documented(self) -> None:
+        undocumented = [n for n, c in self.commands.table.items() if not c.description]
+        self.assertEqual(undocumented, [])
+
+    def test_supervisor_owns_the_command_table(self) -> None:
         with mock.patch.object(Requester, "get_models", return_value=[]), \
                 mock.patch("supervisor.signal.signal"):
             supervisor = Supervisor()
-        undocumented = [n for n, f in supervisor.commands.items() if not f.__doc__]
-        self.assertEqual(undocumented, [])
+        self.assertIn("sm", supervisor.commands.table)
 
 
 if __name__ == "__main__":
