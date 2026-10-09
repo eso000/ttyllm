@@ -9,3 +9,4 @@ dist/
 tags
 .mypy_cache/
 .pytest_cache/
+*.swp
