@@ -6,7 +6,7 @@ from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from buffer import Buffer, ColorCodeException
-from state import State
+from state import ViewMode
 
 if TYPE_CHECKING:
     from supervisor import Supervisor
@@ -25,13 +25,13 @@ class Commands:
         """build the command table for the given supervisor"""
         self.sv: "Supervisor" = supervisor
         self.table: dict[str, Command] = {
-            "m": Command(partial(self.set_view, State.MODELS, 0), "list all models"),
+            "m": Command(partial(self.set_view, ViewMode.MODELS, 0), "list all models"),
             "mr": self._command(self.refresh_models),
-            "h": Command(partial(self.set_view, State.HELP, 0), "show help"),
-            "n": Command(partial(self.set_view, State.NORMAL, -1), "show chat"),
-            "d": Command(partial(self.set_view, State.DATA, 0), "show data"),
+            "h": Command(partial(self.set_view, ViewMode.HELP, 0), "show help"),
+            "n": Command(partial(self.set_view, ViewMode.NORMAL, -1), "show chat"),
+            "d": Command(partial(self.set_view, ViewMode.DATA, 0), "show data"),
             "S": Command(
-                partial(self.set_view, State.SYSTEM, None), "show system prompt"
+                partial(self.set_view, ViewMode.SYSTEM, None), "show system prompt"
             ),
             "s": self._command(self.split),
             "r": self._command(self.redo),
@@ -97,13 +97,11 @@ class Commands:
         return "\n".join(lines)
 
     def set_view(
-        self, view: State, scroll: int | None, *args: str
+        self, view: ViewMode, scroll: int | None, *args: str
     ) -> None:  # pylint: disable=unused-argument
         """show another view, scroll is where it starts and None keeps the position"""
         with self._buffer.cond:
-            if scroll is not None:
-                self.sv.buffer_last = scroll
-            self.sv.state = view
+            self.sv.ui.set_mode(view, scroll)
             self._buffer.updated = True
             self._buffer.cond.notify()
 

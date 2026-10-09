@@ -9,9 +9,11 @@ from unittest import mock
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import supervisor as supervisor_module
+import view as view_module
 from buffer import Buffer
 from requester import Requester
 from request_queue import RequestQueue
+from state import ViewMode
 from supervisor import Supervisor
 from test_requester import _http_response, _serve_once
 
@@ -21,7 +23,7 @@ def _make_supervisor() -> Supervisor:
         "supervisor.signal.signal"
     ):
         sv = Supervisor()
-    sv.notification = ""
+    sv.ui.notification = ""
     return sv
 
 
@@ -37,8 +39,8 @@ class TestRenderThread(unittest.TestCase):
         sys.setswitchinterval(1e-6)
         try:
             with mock.patch.object(
-                supervisor_module, "fit_to_box", lambda *a, **k: (10, -1)
-            ), mock.patch.object(supervisor_module, "fit_text_to_box"):
+                view_module, "fit_to_box", lambda *a, **k: (10, -1)
+            ), mock.patch.object(view_module, "fit_text_to_box"):
                 render = threading.Thread(target=sv.update_buffer)
                 render.start()
                 deadline = time.time() + 1
@@ -59,25 +61,26 @@ class TestRenderThread(unittest.TestCase):
     def test_scroll_during_render_is_not_overwritten(self) -> None:
         sv = _make_supervisor()
         sv.run = True
-        sv.buffer_last = 0
+        sv.ui.scroll = 0
+        sv.current_buffer.updated = False  # drop the startup notification redraw
 
         def scrolling_draw(*args: Any, **kwargs: Any) -> tuple[int, int]:
-            sv.buffer_last = 7  # user scrolls while the screen is drawn
+            sv.ui.scroll = 7  # user scrolls while the screen is drawn
             return (10, 3)
 
         with mock.patch.object(
-            supervisor_module, "fit_to_box", scrolling_draw
-        ), mock.patch.object(supervisor_module, "fit_text_to_box"):
+            view_module, "fit_to_box", scrolling_draw
+        ), mock.patch.object(view_module, "fit_text_to_box"):
             render = threading.Thread(target=sv.update_buffer)
             render.start()
             sv.current_buffer.notify()
             deadline = time.time() + 2
-            while sv.buffer_lines == -1 and time.time() < deadline:
+            while sv.ui.scroll_max == -1 and time.time() < deadline:
                 time.sleep(0.01)
             sv.stop()
             render.join(2)
-        self.assertEqual(sv.buffer_lines, 10)
-        self.assertEqual(sv.buffer_last, 7)
+        self.assertEqual(sv.ui.scroll_max, 10)
+        self.assertEqual(sv.ui.scroll, 7)
 
 
 class TestCancel(unittest.TestCase):
@@ -189,6 +192,48 @@ class TestInput(unittest.TestCase):
         self.assertFalse(sv.run)
 
 
+class TestInputUIState(unittest.TestCase):
+    def _run(self, data: bytes, **state: Any) -> Supervisor:
+        sv = _make_supervisor()
+        sv.run = True
+        for name, value in state.items():
+            setattr(sv.ui, name, value)
+        with mock.patch.object(view_module, "fit_text_to_box"):
+            TestInput()._feed(sv, data)
+        return sv
+
+    def test_up_arrow_scrolls_from_the_end(self) -> None:
+        sv = self._run(b"\x1b[A", scroll=-1, scroll_max=30)
+        self.assertEqual(sv.ui.scroll, 29)
+
+    def test_down_arrow_follows_the_end_again(self) -> None:
+        sv = self._run(b"\x1b[B", scroll=30, scroll_max=30)
+        self.assertEqual(sv.ui.scroll, -1)
+
+    def test_left_and_right_arrows_jump(self) -> None:
+        self.assertEqual(self._run(b"\x1b[C", scroll=7).ui.scroll, 1)
+        self.assertEqual(self._run(b"\x1b[D", scroll=7).ui.scroll, -1)
+
+    def test_typing_a_colon_starts_a_command(self) -> None:
+        sv = self._run(b":sm x")
+        self.assertEqual(sv.ui.command, ":sm x")
+
+    def test_a_key_dismisses_the_notification_and_is_not_typed(self) -> None:
+        sv = self._run(b"a", notification="cannot reach server")
+        self.assertEqual(sv.ui.notification, "")
+        self.assertEqual(sv.current_data["messages"][-1]["content"], "")
+
+    def test_typing_returns_to_the_chat(self) -> None:
+        sv = self._run(b"a", mode=ViewMode.HELP, scroll=4)
+        self.assertIs(sv.ui.mode, ViewMode.NORMAL)
+        self.assertEqual(sv.ui.scroll, -1)
+
+    def test_enter_leaves_another_view(self) -> None:
+        sv = self._run(b"\r", mode=ViewMode.MODELS, scroll=4)
+        self.assertIs(sv.ui.mode, ViewMode.NORMAL)
+        self.assertEqual(sv.ui.scroll, -1)
+
+
 class TestWatcher(unittest.TestCase):
     def test_command_is_taken_atomically_and_cleared(self) -> None:
         sv = _make_supervisor()
@@ -197,7 +242,7 @@ class TestWatcher(unittest.TestCase):
         sv.process_command = lambda command: seen.append(command)  # type: ignore
         sv.update_command = lambda: None  # type: ignore[method-assign]
         with sv.input_cond:
-            sv.command = "/n"
+            sv.ui.command = "/n"
             sv.input_done = True
         watcher = threading.Thread(target=sv.watcher)
         watcher.start()
@@ -207,7 +252,7 @@ class TestWatcher(unittest.TestCase):
         sv.stop()
         watcher.join(2)
         self.assertEqual(seen, ["/n"])
-        self.assertEqual(sv.command, "")
+        self.assertEqual(sv.ui.command, "")
 
 
 class TestGuardedThreads(unittest.TestCase):
@@ -224,7 +269,7 @@ class TestGuardedThreads(unittest.TestCase):
         with mock.patch.object(supervisor_module.time, "sleep"):
             sv._guarded(flaky)()
         self.assertEqual(len(calls), 2)
-        self.assertIn("boom", sv.notification)
+        self.assertIn("boom", sv.ui.notification)
 
 
 if __name__ == "__main__":

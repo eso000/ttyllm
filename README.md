@@ -103,11 +103,12 @@ python3 -m unittest discover -s tests
 | File            | Purpose                                              |
 | --------------- | ---------------------------------------------------- |
 | `__main__.py`   | entry point and CLI flags                            |
-| `supervisor.py` | main loop, TUI, input handling, buffers              |
+| `supervisor.py` | threads, input handling, buffers                     |
 | `commands.py`   | the `:` / `/` commands and the help screen           |
 | `request_queue.py` | serialises reply requests, one buffer at a time   |
 | `terminal.py`   | raw input mode and alternate screen handling         |
-| `state.py`      | which view (chat, help, models, ...) is displayed    |
+| `state.py`      | `UIState`: view mode, scroll, command line, notification |
+| `view.py`       | renders the buffer for the current `UIState`         |
 | `buffer.py`     | per-chat state, messages, and rendering              |
 | `requester.py`  | raw-socket HTTP client and streaming parsers         |
 | `box_drawing.py`| text box layout and wrapping                         |

@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from buffer import Buffer
 from commands import Commands
 from requester import Model, Requester
-from state import State
+from state import ViewMode
 from supervisor import Supervisor
 
 
@@ -19,7 +19,7 @@ def _make_supervisor() -> Supervisor:
         "supervisor.signal.signal"
     ):
         sv = Supervisor()
-    sv.notification = ""
+    sv.ui.notification = ""
     return sv
 
 
@@ -41,7 +41,7 @@ class TestExecute(CommandsTestCase):
 
     def test_text_without_prefix_is_ignored(self) -> None:
         self.assertTrue(self.commands.execute("hello"))
-        self.assertEqual(self.sv.state, State.NORMAL)
+        self.assertEqual(self.sv.ui.mode, ViewMode.NORMAL)
 
     def test_supervisor_delegates_process_command(self) -> None:
         self.assertFalse(self.sv.process_command(":q"))
@@ -55,27 +55,27 @@ class TestExecute(CommandsTestCase):
 class TestViews(CommandsTestCase):
     def test_each_view_command_selects_its_state(self) -> None:
         for name, state in (
-            ("m", State.MODELS),
-            ("h", State.HELP),
-            ("d", State.DATA),
-            ("S", State.SYSTEM),
-            ("n", State.NORMAL),
+            ("m", ViewMode.MODELS),
+            ("h", ViewMode.HELP),
+            ("d", ViewMode.DATA),
+            ("S", ViewMode.SYSTEM),
+            ("n", ViewMode.NORMAL),
         ):
             with self.subTest(command=name):
                 self.commands.execute(f":{name}")
-                self.assertEqual(self.sv.state, state)
+                self.assertEqual(self.sv.ui.mode, state)
 
     def test_scroll_is_reset_per_view(self) -> None:
-        self.sv.buffer_last = 7
+        self.sv.ui.scroll = 7
         self.commands.execute(":d")
-        self.assertEqual(self.sv.buffer_last, 0)
+        self.assertEqual(self.sv.ui.scroll, 0)
         self.commands.execute(":n")
-        self.assertEqual(self.sv.buffer_last, -1)
+        self.assertEqual(self.sv.ui.scroll, -1)
 
     def test_system_view_keeps_the_scroll_position(self) -> None:
-        self.sv.buffer_last = 7
+        self.sv.ui.scroll = 7
         self.commands.execute(":S")
-        self.assertEqual(self.sv.buffer_last, 7)
+        self.assertEqual(self.sv.ui.scroll, 7)
 
     def test_view_marks_buffer_updated(self) -> None:
         self.sv.current_buffer.updated = False
@@ -119,7 +119,7 @@ class TestBuffers(CommandsTestCase):
         self.sv.current_buffer.pending_calls = [{"id": "1"}]  # type: ignore[list-item]
         self.commands.execute(":s")
         self.assertEqual(len(self.sv.buffers), 1)
-        self.assertIn("pending tool calls", self.sv.notification)
+        self.assertIn("pending tool calls", self.sv.ui.notification)
 
     def test_delete_last_buffer_leaves_a_fresh_one(self) -> None:
         old = self.sv.current_buffer
@@ -159,14 +159,14 @@ class TestModelCommands(CommandsTestCase):
     def test_refresh_reports_a_problem(self) -> None:
         with mock.patch.object(Requester, "get_models", return_value=[]):
             self.commands.execute(":mr")
-        self.assertIn("no models found", self.sv.notification)
+        self.assertIn("no models found", self.sv.ui.notification)
 
     def test_refresh_reports_the_count(self) -> None:
         with mock.patch.object(
             Requester, "get_models", return_value=[Model("a"), Model("b")]
         ):
             self.commands.execute(":mr")
-        self.assertEqual(self.sv.notification, "loaded 2 models")
+        self.assertEqual(self.sv.ui.notification, "loaded 2 models")
 
 
 class TestOptions(CommandsTestCase):
@@ -178,15 +178,15 @@ class TestOptions(CommandsTestCase):
 
     def test_unknown_option_is_reported(self) -> None:
         self.commands.execute(":o bogus 1")
-        self.assertIn("bogus", self.sv.notification)
+        self.assertIn("bogus", self.sv.ui.notification)
 
     def test_missing_value_is_reported(self) -> None:
         self.commands.execute(":o k")
-        self.assertEqual(self.sv.notification, "no data provided")
+        self.assertEqual(self.sv.ui.notification, "no data provided")
 
     def test_without_arguments_shows_options(self) -> None:
         self.commands.execute(":o")
-        self.assertIn("top_k", self.sv.notification)
+        self.assertIn("top_k", self.sv.ui.notification)
 
 
 class TestVisual(CommandsTestCase):
@@ -196,11 +196,11 @@ class TestVisual(CommandsTestCase):
 
     def test_invalid_color_is_reported(self) -> None:
         self.commands.execute(":v uc nonsense")
-        self.assertIn("invalid color code", self.sv.notification)
+        self.assertIn("invalid color code", self.sv.ui.notification)
 
     def test_unknown_key_is_reported(self) -> None:
         self.commands.execute(":v zz 1")
-        self.assertIn("zz", self.sv.notification)
+        self.assertIn("zz", self.sv.ui.notification)
 
 
 class TestFiles(CommandsTestCase):
@@ -217,18 +217,18 @@ class TestFiles(CommandsTestCase):
 
     def test_import_missing_file_is_reported(self) -> None:
         self.commands.execute(":i /does/not/exist.json")
-        self.assertIn("not found", self.sv.notification)
+        self.assertIn("not found", self.sv.ui.notification)
 
     def test_import_corrupted_file_is_reported(self) -> None:
         with tempfile.NamedTemporaryFile("w", suffix=".json") as file:
             file.write("{not json")
             file.flush()
             self.commands.execute(f":i {file.name}")
-        self.assertIn("corrupted", self.sv.notification)
+        self.assertIn("corrupted", self.sv.ui.notification)
 
     def test_export_to_missing_directory_is_reported(self) -> None:
         self.commands.execute(":e /does/not/exist/chat.json")
-        self.assertIn("not found", self.sv.notification)
+        self.assertIn("not found", self.sv.ui.notification)
 
 
 class TestImages(CommandsTestCase):
@@ -255,7 +255,7 @@ class TestImages(CommandsTestCase):
     def test_missing_image_is_reported(self) -> None:
         self._user_message()
         self.commands.execute(":image /does/not/exist.png")
-        self.assertIn("not found", self.sv.notification)
+        self.assertIn("not found", self.sv.ui.notification)
 
 
 class TestHelpText(CommandsTestCase):

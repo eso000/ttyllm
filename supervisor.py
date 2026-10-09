@@ -3,7 +3,6 @@ import sys
 import threading
 import time
 import signal
-import shutil
 import select
 import os
 import types
@@ -11,13 +10,14 @@ from collections.abc import Callable
 from glob import glob
 from typing import Any
 
-from box_drawing import make_text_box, clean_screen, fit_text_to_box, fit_to_box
+from box_drawing import clean_screen
 from buffer import Buffer
 from commands import Commands
 from request_queue import RequestQueue
 from requester import Model, Requester
-from state import State
+from state import UIState, ViewMode
 from terminal import raw_terminal
+from view import View
 
 
 class Supervisor:
@@ -29,23 +29,16 @@ class Supervisor:
 
         self.buffers: list[Buffer] = [Buffer()]
         self.current_buffer_id: int = 0
-        self.notification: str = ""
+        self.ui: UIState = UIState.from_terminal()
         self.requester: Requester = Requester(open_api=open_api)
 
         self.run: bool = True
 
-        self.command: str = ""
         self.input_done: bool = False
         self.input_cond: threading.Condition = threading.Condition()
-        self.buffer_last: int = -1
-        self.buffer_lines: int = -1
 
         self.queue: RequestQueue = RequestQueue()
 
-        size = shutil.get_terminal_size()
-        self.columns: int = size.columns
-        self.lines: int = size.lines
-        self.state: State = State.NORMAL
         signal.signal(signal.SIGWINCH, self.handle_sigwinch)
 
         self.models: list[Model] = []
@@ -55,6 +48,9 @@ class Supervisor:
         self.report_models()
 
         self.commands: Commands = Commands(self)
+        self.view: View = View(
+            self.ui, self.commands.help_text, lambda: self.models_short
+        )
 
     @property
     def current_buffer(self) -> Buffer:
@@ -68,8 +64,7 @@ class Supervisor:
 
     def show_notification(self, message: str) -> None:
         """shown over the chat until the user presses a key"""
-        self.notification = message
-        self.buffer_last = 0
+        self.ui.set_notification(message)
         self.current_buffer.notify()
 
     def handle_sigint(self) -> None:
@@ -89,9 +84,7 @@ class Supervisor:
         self, signum: int, frame: types.FrameType | None
     ) -> None:  # pylint: disable=unused-argument
         """re-read the terminal size and redraw after a resize"""
-        size = shutil.get_terminal_size()
-        self.columns = size.columns
-        self.lines = size.lines
+        self.ui.resize()
         clean_screen()
         self.update_command()
         self.current_buffer.notify()
@@ -188,7 +181,7 @@ class Supervisor:
                 while not self.input_done and self.run:
                     self.input_cond.wait()
                 self.input_done = False
-                command, self.command = self.command, ""
+                command = self.ui.take_command()
             if not self.run:
                 return
             self.update_command()
@@ -212,22 +205,13 @@ class Supervisor:
             buffer += ch
 
         if buffer == "[A" or buffer.startswith("OA"):
-            if self.command == "":
-                if self.buffer_last < 0:
-                    self.buffer_last = self.buffer_lines - 1
-                else:
-                    if self.buffer_last:
-                        self.buffer_last -= 1
+            self.ui.scroll_up()
         if buffer == "[B" or buffer.startswith("OB"):
-            if self.command == "":
-                if 0 <= self.buffer_last < self.buffer_lines:
-                    self.buffer_last += 1
-                else:
-                    self.buffer_last = -1
+            self.ui.scroll_down()
         if buffer == "[D":
-            self.buffer_last = -1
+            self.ui.scroll_to_end()
         if buffer == "[C":
-            self.buffer_last = 1
+            self.ui.scroll_to_top()
 
         with self.current_buffer.cond:
             self.current_buffer.updated = True
@@ -235,36 +219,12 @@ class Supervisor:
 
     def update_command(self) -> None:
         """draw the status line, or the command line while a command is typed"""
-        if self.command == "":
-            waiting = [
-                str(number)
-                for number, buffer in enumerate(self.buffers, 1)
-                if buffer.awaiting_approval
-            ]
-            fit_text_to_box(
-                f"    model: {self.current_data['model']}"
-                f" -- tokens: {self.current_buffer.tokens}"
-                f"   buffer: {self.current_buffer_id + 1} of {len(self.buffers)}"
-                f" {'in_request' if self.current_buffer.in_request else
-                    "queued" if self.current_buffer.queued else ""} "
-                f"{'approval needed in: ' + ', '.join(waiting) if waiting else ''}",
-                self.columns,
-                1,
-                self.lines,
-                1,
-                "\033[32m",
-                "\033[0m",
-                hide_cursor=True,
-            )
-        else:
-            fit_text_to_box(
-                self.command, self.columns, 1, self.lines, 1, "\033[32m", "\033[41m"
-            )
+        self.view.draw_command_line(self.buffers, self.current_buffer_id)
 
     def _auto_complete(self) -> None:
         """complete model names and file paths when tab is pressed"""
-        if self.command != "":
-            command_tokens = self.command.split(" ")
+        if self.ui.command != "":
+            command_tokens = self.ui.command.split(" ")
             if len(command_tokens) < 2:
                 return
             possible_completions: list[str] = []
@@ -290,7 +250,7 @@ class Supervisor:
             if len(possible_completions) == 0:
                 return
             if len(possible_completions) == 1:
-                self.command += possible_completions[0][len(command_tokens[1]) :]
+                self.ui.command += possible_completions[0][len(command_tokens[1]) :]
                 self.update_command()
                 return
             common_prefix = possible_completions[0]
@@ -299,7 +259,7 @@ class Supervisor:
                     common_prefix = common_prefix[:-1]
                 if common_prefix == "":
                     return
-            self.command += common_prefix[len(command_tokens[1]) :]
+            self.ui.command += common_prefix[len(command_tokens[1]) :]
             self.update_command()
 
     def stop(self) -> None:
@@ -326,14 +286,13 @@ class Supervisor:
             ch = decoder.decode(data)
             if not ch:
                 continue
-            if self.notification:
-                self.notification = ""
+            if self.ui.dismiss_notification():
                 self.current_buffer.notify()
                 continue
             if (
                 ch in ("y", "n")
-                and self.state == State.NORMAL
-                and self.command == ""
+                and self.ui.mode is ViewMode.NORMAL
+                and self.ui.command == ""
                 and self.current_buffer.awaiting_approval
             ):
                 self.decide_tool_call(ch == "y")
@@ -355,14 +314,14 @@ class Supervisor:
                     case 5:
                         self.commands.undo()
                     case 17:
-                        if self.command == "":
-                            self.command = "/"
+                        if self.ui.command == "":
+                            self.ui.command = "/"
                         else:
-                            self.command = ""
+                            self.ui.command = ""
                         self.update_command()
                     case 21:
-                        if self.command:
-                            self.command = ""
+                        if self.ui.command:
+                            self.ui.command = ""
                             self.current_buffer.notify()
                         else:
                             self.current_buffer.clear_msg()
@@ -372,50 +331,47 @@ class Supervisor:
                     case 3:
                         self.handle_sigint()
                     case 127:
-                        if self.command != "":
-                            self.command = self.command[:-1]
+                        if self.ui.command != "":
+                            self.ui.command = self.ui.command[:-1]
                             self.update_command()
-                            if self.command == "":
+                            if self.ui.command == "":
                                 with self.current_buffer.cond:
                                     self.current_buffer.updated = True
                                     self.current_buffer.cond.notify()
                         else:
-                            self.buffer_last = -1
-                            self.state = State.NORMAL
+                            self.ui.show_chat()
                             self.current_buffer.del_open()
                         continue
                     case 9:
                         self._auto_complete()
 
                 if not ch or ch == "\r" or ch == "\n":
-                    if self.command != "":
-                        if self.command in ("/q", ":q"):
+                    if self.ui.command != "":
+                        if self.ui.command in ("/q", ":q"):
                             self.stop()
                         self.update_command()
                         self.input_done = True
                         self.input_cond.notify()
                     else:
-                        if self.state == State.NORMAL:
+                        if self.ui.mode is ViewMode.NORMAL:
                             self.input_done = True
                             self.input_cond.notify()
                         else:
-                            self.buffer_last = -1
-                            self.state = State.NORMAL
+                            self.ui.show_chat()
                             self.current_buffer.notify()
                 if ch.isprintable():
                     idle, last_empty = self.current_buffer.currently_typed()
-                    if (last_empty or not idle) and self.command == "" and ch in (
+                    if (last_empty or not idle) and self.ui.command == "" and ch in (
                         "/",
                         ":",
                     ):
-                        self.command = ch
+                        self.ui.command = ch
                         self.update_command()
-                    elif idle and self.command == "":
-                        self.buffer_last = -1
-                        self.state = State.NORMAL
+                    elif idle and self.ui.command == "":
+                        self.ui.show_chat()
                         self.current_buffer.add_open(ch)
-                    elif len(self.command) > 0:
-                        self.command += ch
+                    elif len(self.ui.command) > 0:
+                        self.ui.command += ch
                         self.update_command()
                     else:
                         continue
@@ -433,43 +389,16 @@ class Supervisor:
                     continue
                 if len(buffer.chat_data["messages"]) == 0:
                     buffer.add_msg("system")
-                last = self.buffer_last
-                match self.state:
-                    case _ if self.notification:
-                        box = make_text_box(self.notification, self.columns - 4, last)
-                        hide_cursor = True
-                    case State.NORMAL:
-                        box = buffer.get_text_box(self.columns - 4, last)
-                        hide_cursor = False
-                    case State.SYSTEM:
-                        box = buffer.get_text_box_system(self.columns - 4, last)
-                        hide_cursor = True
-                    case State.DATA:
-                        box = buffer.get_text_box_data(self.columns - 4, last)
-                        hide_cursor = True
-                    case State.HELP:
-                        box = make_text_box(
-                            self.commands.help_text(), self.columns - 4, last
-                        )
-                        hide_cursor = True
-                    case State.MODELS:
-                        box = make_text_box(
-                            # json.dumps(self.models, indent=4),
-                            self.models_short,
-                            self.columns - 4,
-                            last,
-                        )
-                        hide_cursor = True
+                scroll = self.ui.scroll
+                box, hide_cursor = self.view.compose(buffer, scroll)
                 buffer.updated = False
 
             self.update_command()
-            lines, new_last = fit_to_box(
-                box, self.columns - 4, self.lines - 5, 2, 3, hide_cursor=hide_cursor
-            )
+            lines, new_scroll = self.view.draw(box, hide_cursor)
             with self.input_cond:
-                self.buffer_lines = lines
-                if self.buffer_last == last:  # not scrolled while drawing
-                    self.buffer_last = new_last
+                self.ui.scroll_max = lines
+                if self.ui.scroll == scroll:  # not scrolled while drawing
+                    self.ui.scroll = new_scroll
 
     def run_chat(self) -> None:
         """set up the terminal, run the worker threads and restore the terminal on exit"""

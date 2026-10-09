@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import requester
 from requester import Model, Requester, _parse_models
 from commands import Commands
+from state import UIState
 from supervisor import Supervisor
 from buffer import Buffer
 
@@ -445,37 +446,36 @@ class TestNotification(unittest.TestCase):
     def setUp(self) -> None:
         self.supervisor = Supervisor.__new__(Supervisor)
         self.supervisor.requester = Requester(port=_closed_port())
-        self.supervisor.notification = ""
+        self.supervisor.ui = UIState()
         self.supervisor.buffers = [Buffer()]
         self.supervisor.current_buffer_id = 0
-        self.supervisor.buffer_last = -1
         self.supervisor.models_list = []
 
     def test_unreachable_server_is_reported(self) -> None:
         self.supervisor.requester.models_error = "refused"
         self.assertTrue(self.supervisor.report_models())
-        self.assertIn("cannot reach", self.supervisor.notification)
-        self.assertIn("refused", self.supervisor.notification)
+        self.assertIn("cannot reach", self.supervisor.ui.notification)
+        self.assertIn("refused", self.supervisor.ui.notification)
 
     def test_no_models_is_reported(self) -> None:
         self.assertTrue(self.supervisor.report_models())
-        self.assertIn("no models found", self.supervisor.notification)
+        self.assertIn("no models found", self.supervisor.ui.notification)
 
     def test_models_present_stays_silent(self) -> None:
         self.supervisor.models_list = ["llama3.2"]
         self.assertFalse(self.supervisor.report_models())
-        self.assertEqual(self.supervisor.notification, "")
+        self.assertEqual(self.supervisor.ui.notification, "")
 
     def test_reply_error_becomes_notification(self) -> None:
         self.supervisor.queue = None  # type: ignore[assignment]
         self.supervisor.requester.get_reply = lambda buffer: "boom"  # type: ignore
         self.supervisor.get_reply(self.supervisor.buffers[0])
-        self.assertEqual(self.supervisor.notification, "boom")
+        self.assertEqual(self.supervisor.ui.notification, "boom")
 
     def test_notification_marks_buffer_for_redraw(self) -> None:
         self.supervisor.show_notification("hello")
         self.assertTrue(self.supervisor.buffers[0].updated)
-        self.assertEqual(self.supervisor.buffer_last, 0)
+        self.assertEqual(self.supervisor.ui.scroll, 0)
 
 
 class TestHelp(unittest.TestCase):
@@ -483,16 +483,14 @@ class TestHelp(unittest.TestCase):
         self.supervisor = Supervisor.__new__(Supervisor)
         self.supervisor.buffers = [Buffer()]
         self.supervisor.current_buffer_id = 0
-        self.supervisor.notification = ""
-        self.supervisor.buffer_last = -1
-        self.supervisor.state = None  # type: ignore[assignment]
+        self.supervisor.ui = UIState()
         self.commands = Commands(self.supervisor)
 
     def test_help_is_a_scrollable_view_not_a_notification(self) -> None:
         self.commands.execute(":h")
-        self.assertEqual(self.supervisor.state.name, "HELP")
-        self.assertEqual(self.supervisor.buffer_last, 0)
-        self.assertEqual(self.supervisor.notification, "")
+        self.assertEqual(self.supervisor.ui.mode.name, "HELP")
+        self.assertEqual(self.supervisor.ui.scroll, 0)
+        self.assertEqual(self.supervisor.ui.notification, "")
 
     def test_help_lists_every_command_with_a_description(self) -> None:
         text = self.commands.help_text()
