@@ -1,7 +1,6 @@
 import codecs
 import json
 import sys
-import termios
 import threading
 import time
 import signal
@@ -18,6 +17,7 @@ from typing import Any
 from box_drawing import make_text_box, clean_screen, fit_text_to_box, fit_to_box
 from buffer import Buffer, ColorCodeException
 from requester import Model, Requester
+from terminal import raw_terminal
 
 
 class State(Enum):
@@ -798,16 +798,7 @@ class Supervisor:
 
     def run_chat(self) -> None:
         """set up the terminal, run the worker threads and restore the terminal on exit"""
-        print("\033[?1049h", end="", flush=True)
-        clean_screen()
         self.run = True
-        fd = sys.stdin.fileno()
-        old = termios.tcgetattr(fd)
-        new = termios.tcgetattr(fd)
-        new[0] &= ~(termios.IXON)
-        new[3] &= ~(termios.ICANON | termios.ECHO | termios.ISIG)
-        termios.tcsetattr(fd, termios.TCSADRAIN, new)
-
         threads = [
             threading.Thread(target=self._guarded(self.get_input)),
             threading.Thread(target=self._guarded(self.update_buffer)),
@@ -815,17 +806,12 @@ class Supervisor:
             threading.Thread(target=self._guarded(self.queue_manager)),
         ]
 
-        try:
+        with raw_terminal():
             for thread in threads:
                 thread.start()
 
             for thread in threads:
                 thread.join()
-        finally:
-            clean_screen()
-            print("\033[?25h", end="", flush=True)
-            print("\033[?1049l", end="", flush=True)
-            termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
     def _guarded(self, target: Callable[[], None]) -> Callable[[], None]:
         """wrap a thread target so an error notifies instead of killing the thread"""

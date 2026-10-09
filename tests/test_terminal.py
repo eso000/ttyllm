@@ -1,0 +1,70 @@
+import contextlib
+import io
+import os
+import pty
+import sys
+import termios
+import unittest
+from unittest import mock
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from terminal import raw_terminal
+
+
+class TestRawTerminal(unittest.TestCase):
+    def setUp(self) -> None:
+        master, slave = pty.openpty()
+        self.addCleanup(os.close, master)
+        self.addCleanup(os.close, slave)
+        self.fd = slave
+        self.stdin = mock.Mock()
+        self.stdin.fileno.return_value = slave
+        patcher = mock.patch.object(sys, "stdin", self.stdin)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _lflag(self) -> int:
+        return int(termios.tcgetattr(self.fd)[3])
+
+    def test_input_is_raw_inside_and_restored_after(self) -> None:
+        before = termios.tcgetattr(self.fd)
+        wanted = termios.ICANON | termios.ECHO | termios.ISIG
+        self.assertEqual(self._lflag() & wanted, wanted)
+        with contextlib.redirect_stdout(io.StringIO()):
+            with raw_terminal():
+                self.assertEqual(self._lflag() & wanted, 0)
+        self.assertEqual(termios.tcgetattr(self.fd), before)
+
+    def test_alternate_screen_is_entered_and_left(self) -> None:
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            with raw_terminal():
+                self.assertIn("\033[?1049h", out.getvalue())
+                self.assertNotIn("\033[?1049l", out.getvalue())
+        self.assertIn("\033[?1049l", out.getvalue())
+        self.assertIn("\033[?25h", out.getvalue())
+
+    def test_terminal_is_restored_after_an_error(self) -> None:
+        before = termios.tcgetattr(self.fd)
+        with contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(RuntimeError):
+                with raw_terminal():
+                    raise RuntimeError("boom")
+        self.assertEqual(termios.tcgetattr(self.fd), before)
+
+    def test_non_tty_leaves_the_screen_untouched(self) -> None:
+        read_fd, write_fd = os.pipe()
+        self.addCleanup(os.close, read_fd)
+        self.addCleanup(os.close, write_fd)
+        self.stdin.fileno.return_value = read_fd
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            with self.assertRaises(termios.error):
+                with raw_terminal():
+                    pass
+        self.assertEqual(out.getvalue(), "")
+
+
+if __name__ == "__main__":
+    unittest.main()
