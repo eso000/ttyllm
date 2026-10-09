@@ -14,13 +14,14 @@ if TYPE_CHECKING:
 
 @dataclasses.dataclass(frozen=True)
 class Command:
-    """a colon command and the one line description shown in the help"""
+    """a colon command, its one line description and whether it takes arguments"""
     handler: Callable[..., None]
     description: str
+    takes_args: bool = False
 
 
 class Commands:
-    """the colon commands of the chat, acting on a supervisor"""
+    """the colon commands of the chat, buffer commands are the supervisor's own methods"""
     def __init__(self, supervisor: "Supervisor") -> None:
         """build the command table for the given supervisor"""
         self.sv: "Supervisor" = supervisor
@@ -33,15 +34,15 @@ class Commands:
             "S": Command(
                 partial(self.set_view, ViewMode.SYSTEM, None), "show system prompt"
             ),
-            "s": self._command(self.split),
-            "r": self._command(self.redo),
-            "R": self._command(self.start_over),
-            "rr": self._command(self.undo),
-            "bc": self._command(self.create_buffer),
-            "bn": self._command(self.buffer_next),
-            "bp": self._command(self.buffer_previous),
-            "bd": self._command(self.buffer_delete),
-            "sm": self._command(self.switch_model),
+            "s": self._command(supervisor.split),
+            "r": self._command(supervisor.redo),
+            "R": self._command(supervisor.start_over),
+            "rr": self._command(supervisor.undo),
+            "bc": self._command(supervisor.create_buffer),
+            "bn": self._command(supervisor.buffer_next),
+            "bp": self._command(supervisor.buffer_previous),
+            "bd": self._command(supervisor.buffer_delete),
+            "sm": self._command(self.switch_model, takes_args=True),
             "ai": Command(
                 partial(self.change_role, "assistant"),
                 "change current message to assistant",
@@ -53,19 +54,19 @@ class Commands:
                 partial(self.change_role, "system"),
                 "change current message to system",
             ),
-            "i": self._command(self.import_chat),
-            "e": self._command(self.export_chat),
-            "v": self._command(self.visual),
-            "o": self._command(self.options),
-            "image": self._command(self.add_image),
+            "i": self._command(self.import_chat, takes_args=True),
+            "e": self._command(self.export_chat, takes_args=True),
+            "v": self._command(self.visual, takes_args=True),
+            "o": self._command(self.options, takes_args=True),
+            "image": self._command(self.add_image, takes_args=True),
             "rmi": self._command(self.remove_image),
-            "-": self._command(self.correct),
+            "-": self._command(supervisor.correct),
         }
 
     @staticmethod
-    def _command(handler: Callable[..., None]) -> Command:
+    def _command(handler: Callable[..., None], takes_args: bool = False) -> Command:
         """a command described by the docstring of its handler"""
-        return Command(handler, handler.__doc__ or "")
+        return Command(handler, handler.__doc__ or "", takes_args)
 
     @property
     def _buffer(self) -> Buffer:
@@ -85,8 +86,13 @@ class Commands:
         parts[0] = parts[0][1:]
         if parts[0] == "q":
             return False
-        if parts[0] in self.table:
-            self.table[parts[0]].handler(*parts[1:])
+        entry = self.table.get(parts[0])
+        if entry is None:
+            return True
+        if entry.takes_args:
+            entry.handler(*parts[1:])
+        else:
+            entry.handler()
         return True
 
     def help_text(self) -> str:
@@ -96,22 +102,18 @@ class Commands:
             lines.append(f"{name}:\t{command.description}")
         return "\n".join(lines)
 
-    def set_view(
-        self, view: ViewMode, scroll: int | None, *args: str
-    ) -> None:  # pylint: disable=unused-argument
+    def set_view(self, view: ViewMode, scroll: int | None) -> None:
         """show another view, scroll is where it starts and None keeps the position"""
         with self._buffer.cond:
             self.sv.ui.set_mode(view, scroll)
             self._buffer.updated = True
             self._buffer.cond.notify()
 
-    def change_role(
-        self, role: str, *args: str
-    ) -> None:  # pylint: disable=unused-argument
+    def change_role(self, role: str) -> None:
         """change the role of the current message"""
         self._buffer.change_msg(role)
 
-    def remove_image(self, *args: str) -> None:  # pylint: disable=unused-argument
+    def remove_image(self) -> None:
         """remove images from current message"""
         with self._buffer.cond:
             if "images" in self._data["messages"][-1]:
@@ -137,71 +139,11 @@ class Commands:
         except FileNotFoundError:
             self.sv.show_notification(f"File {args[0]} not found")
 
-    def refresh_models(self, *args: str) -> None:  # pylint: disable=unused-argument
+    def refresh_models(self) -> None:
         """fetch the model list from the server again"""
         self.sv.load_models()
         if not self.sv.report_models():
             self.sv.show_notification(f"loaded {len(self.sv.models_list)} models")
-
-    def split(self, *args: str) -> None:  # pylint: disable=unused-argument
-        """creates new buffer from current"""
-        if self._buffer.pending_calls:
-            self.sv.show_notification("answer the pending tool calls before splitting")
-            return
-        new = Buffer()
-        with self._buffer.cond:
-            new.chat_data = json.loads(json.dumps(self._data))
-            new.visual_data = json.loads(json.dumps(self._buffer.visual_data))
-            new.tokens = self._buffer.tokens
-        self.sv.buffers.append(new)
-        self.sv.change_buffer(len(self.sv.buffers) - 1)
-
-    def correct(self, *args: str) -> None:  # pylint: disable=unused-argument
-        """removes last message"""
-        self._buffer.del_msg(1)
-
-    def redo(self, *args: str) -> None:  # pylint: disable=unused-argument
-        """regenerate last message"""
-        self._buffer.del_msg(2)
-        self.sv.queue.schedule(self._buffer)
-
-    def start_over(self, *args: str) -> None:  # pylint: disable=unused-argument
-        """reset current buffer"""
-        self._buffer.empty()
-
-    def undo(self, *args: str) -> None:  # pylint: disable=unused-argument
-        """revert last user message"""
-        self._buffer.del_msg(3)
-        self._buffer.add_msg("user")
-
-    def create_buffer(self, *args: str) -> None:  # pylint: disable=unused-argument
-        """create new blank buffer"""
-        self.sv.buffers.append(Buffer())
-        self.sv.change_buffer(len(self.sv.buffers) - 1)
-
-    def buffer_next(self, *args: str) -> None:  # pylint: disable=unused-argument
-        """switch to next buffer"""
-        if self.sv.current_buffer_id < len(self.sv.buffers) - 1:
-            self.sv.change_buffer(self.sv.current_buffer_id + 1)
-
-    def buffer_previous(self, *args: str) -> None:  # pylint: disable=unused-argument
-        """switch to previous buffer"""
-        if self.sv.current_buffer_id > 0:
-            self.sv.change_buffer(self.sv.current_buffer_id - 1)
-
-    def buffer_delete(self, *args: str) -> None:  # pylint: disable=unused-argument
-        """delete current buffer"""
-        old_buffer = self._buffer
-        self.sv.queue.deschedule(old_buffer)
-        old_buffer.abort_pending()
-        self.sv.buffers.pop(self.sv.current_buffer_id)
-        if len(self.sv.buffers) == 0:
-            self.sv.buffers.append(Buffer())
-        if self.sv.current_buffer_id == len(self.sv.buffers):
-            self.sv.current_buffer_id -= 1
-        with old_buffer.cond:
-            old_buffer.cond.notify()
-        self._buffer.notify()
 
     def switch_model(self, *args: str) -> None:
         """switch model -- argument: model name"""

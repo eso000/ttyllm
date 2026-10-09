@@ -9,7 +9,6 @@ from unittest import mock
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import view as view_module
-from requester import Requester
 from state import ViewMode
 from supervisor import Supervisor
 
@@ -19,19 +18,9 @@ CTRL_S, CTRL_U, TAB, BACKSPACE = b"\x13", b"\x15", b"\t", b"\x7f"
 UP, DOWN, RIGHT, LEFT = b"\x1b[A", b"\x1b[B", b"\x1b[C", b"\x1b[D"
 
 
-def _make_supervisor() -> Supervisor:
-    with mock.patch.object(Requester, "get_models", return_value=[]), mock.patch(
-        "supervisor.signal.signal"
-    ):
-        sv = Supervisor()
-    sv.ui.notification = ""
-    sv.ui.scroll = -1
-    return sv
-
-
 def press(data: bytes, sv: Supervisor | None = None, **state: Any) -> Supervisor:
     """feed raw bytes through the input thread until stdin closes"""
-    sv = sv or _make_supervisor()
+    sv = sv or Supervisor()
     sv.run = True
     for name, value in state.items():
         setattr(sv.ui, name, value)
@@ -43,7 +32,7 @@ def press(data: bytes, sv: Supervisor | None = None, **state: Any) -> Supervisor
     with mock.patch.object(sys, "stdin", stdin), mock.patch.object(
         view_module, "fit_text_to_box"
     ):
-        thread = threading.Thread(target=sv.get_input)
+        thread = threading.Thread(target=sv.keyboard.run)
         thread.start()
         thread.join(2)
     os.close(read_fd)
@@ -70,7 +59,7 @@ class TestBufferKeys(unittest.TestCase):
         self.assertEqual(press(CTRL_B + CTRL_P + CTRL_N).current_buffer_id, 1)
 
     def test_ctrl_s_splits_the_buffer(self) -> None:
-        sv = _make_supervisor()
+        sv = Supervisor()
         sv.current_data["model"] = "llama"
         press(CTRL_S, sv)
         self.assertEqual(len(sv.buffers), 2)
@@ -92,7 +81,7 @@ class TestBufferKeys(unittest.TestCase):
         self.assertEqual((last["role"], last["content"]), ("user", ""))
 
     def test_ctrl_c_removes_the_buffer_from_the_queue(self) -> None:
-        sv = _make_supervisor()
+        sv = Supervisor()
         sv.queue.schedule(sv.current_buffer)
         self.assertTrue(sv.current_buffer.queued)
         press(CTRL_C, sv)
@@ -122,7 +111,7 @@ class TestCommandLine(unittest.TestCase):
         self.assertEqual(sv.ui.command, "")
 
     def test_colon_while_a_request_runs_starts_a_command(self) -> None:
-        sv = _make_supervisor()
+        sv = Supervisor()
         sv.current_buffer.in_request = True
         sv.current_buffer.chat_data["messages"][-1]["content"] = "busy"
         press(b":", sv)
@@ -154,7 +143,7 @@ class TestTyping(unittest.TestCase):
         self.assertEqual(sv.ui.command, "")
 
     def test_text_is_not_added_while_a_request_runs(self) -> None:
-        sv = _make_supervisor()
+        sv = Supervisor()
         sv.current_buffer.in_request = True
         press(b"x", sv)
         self.assertEqual(content(sv), "")
@@ -197,7 +186,7 @@ class TestEnter(unittest.TestCase):
 class TestToolApproval(unittest.TestCase):
     def _press(self, data: bytes, **state: Any) -> tuple[Supervisor, dict[str, Any]]:
         call = pending_call()
-        sv = _make_supervisor()
+        sv = Supervisor()
         sv.current_buffer.set_pending([call])
         return press(data, sv, **state), call
 
@@ -267,7 +256,7 @@ class TestTabCompletion(unittest.TestCase):
     MODELS = ["llama3.2", "llama3.1", "mistral"]
 
     def _complete(self, command: str) -> str:
-        sv = _make_supervisor()
+        sv = Supervisor()
         sv.models_list = self.MODELS
         return press(command.encode() + TAB, sv).ui.command
 

@@ -39,15 +39,14 @@ class InputHandler:
     def __init__(self, supervisor: "Supervisor") -> None:
         """bind every control key to its action"""
         self.sv: "Supervisor" = supervisor
-        commands = supervisor.commands
         self.keys: dict[int, Callable[[], None]] = {
-            Key.CTRL_S: commands.split,
-            Key.CTRL_B: commands.create_buffer,
-            Key.CTRL_D: commands.buffer_delete,
-            Key.CTRL_N: commands.buffer_next,
-            Key.CTRL_P: commands.buffer_previous,
-            Key.CTRL_R: commands.redo,
-            Key.CTRL_E: commands.undo,
+            Key.CTRL_S: supervisor.split,
+            Key.CTRL_B: supervisor.create_buffer,
+            Key.CTRL_D: supervisor.buffer_delete,
+            Key.CTRL_N: supervisor.buffer_next,
+            Key.CTRL_P: supervisor.buffer_previous,
+            Key.CTRL_R: supervisor.redo,
+            Key.CTRL_E: supervisor.undo,
             Key.CTRL_Q: self.toggle_command_line,
             Key.CTRL_U: self.clear_line,
             Key.ESCAPE: self.escape,
@@ -95,7 +94,7 @@ class InputHandler:
     def toggle_command_line(self) -> None:
         """open the command line, or close it again"""
         self.sv.ui.command = "/" if self.sv.ui.command == "" else ""
-        self.sv.update_command()
+        self.sv.view.draw_command_line()
 
     def clear_line(self) -> None:
         """clear the command line, or the message when there is no command"""
@@ -110,7 +109,7 @@ class InputHandler:
         sv, ui = self.sv, self.sv.ui
         if ui.command != "":
             ui.command = ui.command[:-1]
-            sv.update_command()
+            sv.view.draw_command_line()
             if ui.command == "":
                 sv.current_buffer.notify()
         else:
@@ -125,7 +124,7 @@ class InputHandler:
         suffix = complete(ui.command, sv.models_list)
         if suffix:
             ui.command += suffix
-            sv.update_command()
+            sv.view.draw_command_line()
 
     def enter(self) -> None:
         """submit the command or message, or leave the current view"""
@@ -133,7 +132,7 @@ class InputHandler:
         if ui.command != "":
             if ui.command in QUIT_COMMANDS:
                 sv.stop()
-            sv.update_command()
+            sv.view.draw_command_line()
             sv.submit_input()
         elif ui.mode is ViewMode.NORMAL:
             sv.submit_input()
@@ -147,13 +146,13 @@ class InputHandler:
         idle, last_empty = sv.current_buffer.currently_typed()
         if (last_empty or not idle) and ui.command == "" and ch in ("/", ":"):
             ui.command = ch
-            sv.update_command()
+            sv.view.draw_command_line()
         elif idle and ui.command == "":
             ui.show_chat()
             sv.current_buffer.add_open(ch)
         elif ui.command:
             ui.command += ch
-            sv.update_command()
+            sv.view.draw_command_line()
 
     def escape(self) -> None:
         """handle an escape sequence, the arrow keys scroll"""

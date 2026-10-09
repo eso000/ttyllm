@@ -1,3 +1,4 @@
+import dataclasses
 import json
 import os
 import sys
@@ -7,25 +8,15 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from buffer import Buffer
 from commands import Commands
 from requester import Model, Requester
 from state import ViewMode
 from supervisor import Supervisor
 
 
-def _make_supervisor() -> Supervisor:
-    with mock.patch.object(Requester, "get_models", return_value=[]), mock.patch(
-        "supervisor.signal.signal"
-    ):
-        sv = Supervisor()
-    sv.ui.notification = ""
-    return sv
-
-
 class CommandsTestCase(unittest.TestCase):
     def setUp(self) -> None:
-        self.sv = _make_supervisor()
+        self.sv = Supervisor()
         self.commands = self.sv.commands
         self.sv.buffers[0].add_msg("system")
 
@@ -43,13 +34,62 @@ class TestExecute(CommandsTestCase):
         self.assertTrue(self.commands.execute("hello"))
         self.assertEqual(self.sv.ui.mode, ViewMode.NORMAL)
 
-    def test_supervisor_delegates_process_command(self) -> None:
-        self.assertFalse(self.sv.process_command(":q"))
-
     def test_extra_arguments_do_not_break_argless_commands(self) -> None:
-        for name in ("n", "d", "S", "h", "m", "ai", "us", "sys", "mr"):
+        argless = [n for n, c in self.commands.table.items() if not c.takes_args]
+        self.assertGreater(len(argless), 15)
+        with mock.patch.object(Requester, "get_models", return_value=[]):
+            for name in argless:
+                with self.subTest(command=name):
+                    sv = Supervisor()
+                    self.assertTrue(sv.commands.execute(f":{name} unexpected extra"))
+
+
+class TestCommandTable(CommandsTestCase):
+    def test_buffer_commands_are_the_supervisors_own_methods(self) -> None:
+        for name, method in (
+            ("s", self.sv.split),
+            ("r", self.sv.redo),
+            ("R", self.sv.start_over),
+            ("rr", self.sv.undo),
+            ("bc", self.sv.create_buffer),
+            ("bn", self.sv.buffer_next),
+            ("bp", self.sv.buffer_previous),
+            ("bd", self.sv.buffer_delete),
+            ("-", self.sv.correct),
+        ):
             with self.subTest(command=name):
-                self.assertTrue(self.commands.execute(f":{name} unexpected extra"))
+                self.assertEqual(self.commands.table[name].handler, method)
+
+    def test_exactly_the_commands_with_arguments_take_them(self) -> None:
+        takes = {n for n, c in self.commands.table.items() if c.takes_args}
+        self.assertEqual(takes, {"sm", "i", "e", "v", "o", "image"})
+
+    def test_arguments_reach_the_commands_that_take_them(self) -> None:
+        for name in ("sm", "i", "e", "v", "o", "image"):
+            with self.subTest(command=name):
+                handler = mock.Mock()
+                entry = dataclasses.replace(self.commands.table[name], handler=handler)
+                self.commands.table[name] = entry
+                self.commands.execute(f":{name} first second")
+                handler.assert_called_once_with("first", "second")
+
+    def test_a_command_without_arguments_is_called_bare(self) -> None:
+        handler = mock.Mock()
+        self.commands.table["bc"] = dataclasses.replace(
+            self.commands.table["bc"], handler=handler
+        )
+        self.commands.execute(":bc ignored words")
+        handler.assert_called_once_with()
+
+    def test_unknown_commands_are_ignored(self) -> None:
+        before = len(self.sv.buffers)
+        self.assertTrue(self.commands.execute(":nothing here"))
+        self.assertEqual(len(self.sv.buffers), before)
+
+    def test_every_description_comes_from_a_docstring_or_is_explicit(self) -> None:
+        for name, entry in self.commands.table.items():
+            with self.subTest(command=name):
+                self.assertTrue(entry.description.strip())
 
 
 class TestViews(CommandsTestCase):

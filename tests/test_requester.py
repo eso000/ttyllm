@@ -5,7 +5,6 @@ import socket
 import threading
 import unittest
 from typing import Any
-from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -503,9 +502,7 @@ class TestHelp(unittest.TestCase):
         self.assertEqual(undocumented, [])
 
     def test_supervisor_owns_the_command_table(self) -> None:
-        with mock.patch.object(Requester, "get_models", return_value=[]), \
-                mock.patch("supervisor.signal.signal"):
-            supervisor = Supervisor()
+        supervisor = Supervisor()
         self.assertIn("sm", supervisor.commands.table)
 
 

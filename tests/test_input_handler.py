@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import view as view_module
 from input_handler import InputHandler, Key
-from test_input_keys import _make_supervisor, content, press
+from test_input_keys import content, press
 from state import ViewMode
 from supervisor import Supervisor
 
@@ -35,7 +35,7 @@ def stdin_with(data: bytes, close: bool = True) -> Iterator[None]:
 
 class HandlerTestCase(unittest.TestCase):
     def setUp(self) -> None:
-        self.sv: Supervisor = _make_supervisor()
+        self.sv: Supervisor = Supervisor()
         self.handler: InputHandler = self.sv.keyboard
         patcher = mock.patch.object(view_module, "fit_text_to_box")
         patcher.start()
@@ -66,11 +66,12 @@ class TestKeyTable(HandlerTestCase):
             with self.subTest(key=key.name):
                 self.assertEqual(key, ord(letter) - 64)
 
-    def test_actions_are_the_supervisor_commands(self) -> None:
-        commands = self.sv.commands
-        self.assertEqual(self.handler.keys[Key.CTRL_S], commands.split)
-        self.assertEqual(self.handler.keys[Key.CTRL_B], commands.create_buffer)
-        self.assertEqual(self.handler.keys[Key.CTRL_D], commands.buffer_delete)
+    def test_actions_are_the_supervisor_methods(self) -> None:
+        self.assertEqual(self.handler.keys[Key.CTRL_S], self.sv.split)
+        self.assertEqual(self.handler.keys[Key.CTRL_B], self.sv.create_buffer)
+        self.assertEqual(self.handler.keys[Key.CTRL_D], self.sv.buffer_delete)
+        self.assertEqual(self.handler.keys[Key.CTRL_R], self.sv.redo)
+        self.assertEqual(self.handler.keys[Key.CTRL_E], self.sv.undo)
         self.assertEqual(self.handler.keys[Key.CTRL_C], self.sv.handle_sigint)
 
 
@@ -167,7 +168,7 @@ class TestLineEditing(HandlerTestCase):
         self.assertEqual(self.sv.ui.command, "")
 
     def test_the_command_line_is_redrawn_after_an_edit(self) -> None:
-        with mock.patch.object(self.sv, "update_command") as redraw:
+        with mock.patch.object(self.sv.view, "draw_command_line") as redraw:
             self.type(":a")
             self.handler.handle_key("\x7f")
         self.assertEqual(redraw.call_count, 3)
@@ -190,7 +191,7 @@ class TestLineEditing(HandlerTestCase):
 
     def test_tab_does_not_redraw_when_nothing_completes(self) -> None:
         self.type(":sm zz")
-        with mock.patch.object(self.sv, "update_command") as redraw:
+        with mock.patch.object(self.sv.view, "draw_command_line") as redraw:
             self.handler.handle_key("\t")
         redraw.assert_not_called()
 
@@ -323,13 +324,13 @@ class TestEscapeKey(unittest.TestCase):
         self.assertEqual(content(sv), "ab")
 
     def test_escape_notifies_the_renderer_after_a_sequence(self) -> None:
-        sv = _make_supervisor()
+        sv = Supervisor()
         sv.current_buffer.updated = False
         press(b"\x1b[B", sv)
         self.assertTrue(sv.current_buffer.updated)
 
     def test_escape_without_a_sequence_does_not_notify(self) -> None:
-        sv = _make_supervisor()
+        sv = Supervisor()
         sv.current_buffer.updated = False
         press(b"\x1b\x1b", sv)
         self.assertFalse(sv.current_buffer.updated)

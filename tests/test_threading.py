@@ -18,18 +18,9 @@ from supervisor import Supervisor
 from test_requester import _http_response, _serve_once
 
 
-def _make_supervisor() -> Supervisor:
-    with mock.patch.object(Requester, "get_models", return_value=[]), mock.patch(
-        "supervisor.signal.signal"
-    ):
-        sv = Supervisor()
-    sv.ui.notification = ""
-    return sv
-
-
 class TestRenderThread(unittest.TestCase):
     def test_survives_rapid_buffer_switching(self) -> None:
-        sv = _make_supervisor()
+        sv = Supervisor()
         sv.buffers.append(Buffer())
         sv.run = True
         errors = []
@@ -59,10 +50,10 @@ class TestRenderThread(unittest.TestCase):
         self.assertFalse(render.is_alive())
 
     def test_scroll_during_render_is_not_overwritten(self) -> None:
-        sv = _make_supervisor()
+        sv = Supervisor()
         sv.run = True
         sv.ui.scroll = 0
-        sv.current_buffer.updated = False  # drop the startup notification redraw
+        sv.current_buffer.updated = False  # a new buffer starts out as updated
 
         def scrolling_draw(*args: Any, **kwargs: Any) -> tuple[int, int]:
             sv.ui.scroll = 7  # user scrolls while the screen is drawn
@@ -171,21 +162,21 @@ class TestInput(unittest.TestCase):
         stdin = mock.Mock()
         stdin.fileno.return_value = read_fd
         with mock.patch.object(sys, "stdin", stdin):
-            thread = threading.Thread(target=sv.get_input)
+            thread = threading.Thread(target=sv.keyboard.run)
             thread.start()
             thread.join(2)
         os.close(read_fd)
         return thread
 
     def test_multibyte_character_is_typed_not_fatal(self) -> None:
-        sv = _make_supervisor()
+        sv = Supervisor()
         sv.run = True
         thread = self._feed(sv, "ä".encode())
         self.assertFalse(thread.is_alive())
         self.assertEqual(sv.current_data["messages"][-1]["content"], "ä")
 
     def test_closed_stdin_stops_the_app(self) -> None:
-        sv = _make_supervisor()
+        sv = Supervisor()
         sv.run = True
         thread = self._feed(sv, b"")
         self.assertFalse(thread.is_alive())
@@ -194,7 +185,7 @@ class TestInput(unittest.TestCase):
 
 class TestInputUIState(unittest.TestCase):
     def _run(self, data: bytes, **state: Any) -> Supervisor:
-        sv = _make_supervisor()
+        sv = Supervisor()
         sv.run = True
         for name, value in state.items():
             setattr(sv.ui, name, value)
@@ -236,11 +227,11 @@ class TestInputUIState(unittest.TestCase):
 
 class TestWatcher(unittest.TestCase):
     def test_command_is_taken_atomically_and_cleared(self) -> None:
-        sv = _make_supervisor()
+        sv = Supervisor()
         sv.run = True
         seen = []
-        sv.process_command = lambda command: seen.append(command)  # type: ignore
-        sv.update_command = lambda: None  # type: ignore[method-assign]
+        sv.commands.execute = lambda command: seen.append(command)  # type: ignore
+        sv.view.draw_command_line = lambda: None  # type: ignore[method-assign]
         with sv.input_cond:
             sv.ui.command = "/n"
             sv.input_done = True
@@ -257,7 +248,7 @@ class TestWatcher(unittest.TestCase):
 
 class TestGuardedThreads(unittest.TestCase):
     def test_failing_worker_is_reported_and_restarted(self) -> None:
-        sv = _make_supervisor()
+        sv = Supervisor()
         sv.run = True
         calls = []
 
@@ -267,7 +258,7 @@ class TestGuardedThreads(unittest.TestCase):
                 raise RuntimeError("boom")
 
         with mock.patch.object(supervisor_module.time, "sleep"):
-            sv._guarded(flaky)()
+            sv._guarded("worker", flaky)()
         self.assertEqual(len(calls), 2)
         self.assertIn("boom", sv.ui.notification)
 

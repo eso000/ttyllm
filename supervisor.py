@@ -1,3 +1,4 @@
+import json
 import threading
 import time
 import signal
@@ -20,7 +21,7 @@ class Supervisor:
     """owns the buffers, threads and terminal, and drives the whole chat"""
     def __init__(self, open_api: bool = False) -> None:
 
-        """set up buffers, commands, request queue and the model list"""
+        """set up buffers, commands and request queue, run_chat loads the models"""
         self.open_api: bool = open_api
 
         self.buffers: list[Buffer] = [Buffer()]
@@ -35,19 +36,13 @@ class Supervisor:
 
         self.queue: RequestQueue = RequestQueue()
 
-        signal.signal(signal.SIGWINCH, self.handle_sigwinch)
-
         self.models: list[Model] = []
         self.models_list: list[str] = []
         self.models_short: str = ""
-        self.load_models()
-        self.report_models()
 
         self.commands: Commands = Commands(self)
         self.keyboard: InputHandler = InputHandler(self)
-        self.view: View = View(
-            self.ui, self.commands.help_text, lambda: self.models_short
-        )
+        self.view: View = View(self)
 
     @property
     def current_buffer(self) -> Buffer:
@@ -83,7 +78,7 @@ class Supervisor:
         """re-read the terminal size and redraw after a resize"""
         self.ui.resize()
         clean_screen()
-        self.update_command()
+        self.view.draw_command_line()
         self.current_buffer.notify()
 
     def get_reply(self, buffer: Buffer) -> None:
@@ -106,6 +101,66 @@ class Supervisor:
         with self.current_buffer.cond:
             self.current_buffer.updated = True
             self.current_buffer.cond.notify()
+
+    def split(self) -> None:
+        """creates new buffer from current"""
+        if self.current_buffer.pending_calls:
+            self.show_notification("answer the pending tool calls before splitting")
+            return
+        new = Buffer()
+        with self.current_buffer.cond:
+            new.chat_data = json.loads(json.dumps(self.current_data))
+            new.visual_data = json.loads(json.dumps(self.current_buffer.visual_data))
+            new.tokens = self.current_buffer.tokens
+        self.buffers.append(new)
+        self.change_buffer(len(self.buffers) - 1)
+
+    def correct(self) -> None:
+        """removes last message"""
+        self.current_buffer.del_msg(1)
+
+    def redo(self) -> None:
+        """regenerate last message"""
+        self.current_buffer.del_msg(2)
+        self.queue.schedule(self.current_buffer)
+
+    def start_over(self) -> None:
+        """reset current buffer"""
+        self.current_buffer.empty()
+
+    def undo(self) -> None:
+        """revert last user message"""
+        self.current_buffer.del_msg(3)
+        self.current_buffer.add_msg("user")
+
+    def create_buffer(self) -> None:
+        """create new blank buffer"""
+        self.buffers.append(Buffer())
+        self.change_buffer(len(self.buffers) - 1)
+
+    def buffer_next(self) -> None:
+        """switch to next buffer"""
+        if self.current_buffer_id < len(self.buffers) - 1:
+            self.change_buffer(self.current_buffer_id + 1)
+
+    def buffer_previous(self) -> None:
+        """switch to previous buffer"""
+        if self.current_buffer_id > 0:
+            self.change_buffer(self.current_buffer_id - 1)
+
+    def buffer_delete(self) -> None:
+        """delete current buffer"""
+        old_buffer = self.current_buffer
+        self.queue.deschedule(old_buffer)
+        old_buffer.abort_pending()
+        self.buffers.pop(self.current_buffer_id)
+        if len(self.buffers) == 0:
+            self.buffers.append(Buffer())
+        if self.current_buffer_id == len(self.buffers):
+            self.current_buffer_id -= 1
+        with old_buffer.cond:
+            old_buffer.cond.notify()
+        self.current_buffer.notify()
 
     ############# internal commands
     def load_models(self) -> None:
@@ -143,10 +198,6 @@ class Supervisor:
             self.show_notification(problem)
         return problem is not None
 
-    def process_command(self, command: str) -> bool:
-        """run a slash or colon command, False when the user wants to quit"""
-        return self.commands.execute(command)
-
     def handle_new_message(self) -> None:
         """schedule the current buffer after the user submitted a message"""
         buffer = self.current_buffer
@@ -181,15 +232,11 @@ class Supervisor:
                 command = self.ui.take_command()
             if not self.run:
                 return
-            self.update_command()
+            self.view.draw_command_line()
             if len(command) > 0:
-                self.process_command(command)
+                self.commands.execute(command)
             else:
                 self.handle_new_message()
-
-    def update_command(self) -> None:
-        """draw the status line, or the command line while a command is typed"""
-        self.view.draw_command_line(self.buffers, self.current_buffer_id)
 
     def stop(self) -> None:
         """end the chat: cancel requests and wake every waiting thread"""
@@ -209,10 +256,6 @@ class Supervisor:
             self.input_done = True
             self.input_cond.notify()
 
-    def get_input(self) -> None:
-        """input thread: turn raw keystrokes into commands, edits and approvals"""
-        self.keyboard.run()
-
     def update_buffer(self) -> None:
         """render thread: redraw the view whenever the buffer changes"""
         while self.run:
@@ -230,7 +273,7 @@ class Supervisor:
                 box, hide_cursor = self.view.compose(buffer, scroll)
                 buffer.updated = False
 
-            self.update_command()
+            self.view.draw_command_line()
             lines, new_scroll = self.view.draw(box, hide_cursor)
             with self.input_cond:
                 self.ui.scroll_max = lines
@@ -238,23 +281,32 @@ class Supervisor:
                     self.ui.scroll = new_scroll
 
     def run_chat(self) -> None:
-        """set up the terminal, run the worker threads and restore the terminal on exit"""
+        """load the models, run the worker threads in the terminal and restore it on exit"""
+        self.load_models()
+        self.report_models()
         self.run = True
         threads = [
-            threading.Thread(target=self._guarded(self.get_input)),
-            threading.Thread(target=self._guarded(self.update_buffer)),
-            threading.Thread(target=self._guarded(self.watcher)),
-            threading.Thread(target=self._guarded(self.queue_manager)),
+            threading.Thread(target=self._guarded(name, target), name=name)
+            for name, target in (
+                ("input", self.keyboard.run),
+                ("render", self.update_buffer),
+                ("dispatch", self.watcher),
+                ("replies", self.queue_manager),
+            )
         ]
 
         with raw_terminal():
-            for thread in threads:
-                thread.start()
+            previous = signal.signal(signal.SIGWINCH, self.handle_sigwinch)
+            try:
+                for thread in threads:
+                    thread.start()
 
-            for thread in threads:
-                thread.join()
+                for thread in threads:
+                    thread.join()
+            finally:
+                signal.signal(signal.SIGWINCH, previous or signal.SIG_DFL)
 
-    def _guarded(self, target: Callable[[], None]) -> Callable[[], None]:
+    def _guarded(self, name: str, target: Callable[[], None]) -> Callable[[], None]:
         """wrap a thread target so an error notifies instead of killing the thread"""
         def run() -> None:
             """call the target, restarting it after errors until the chat stops"""
@@ -263,7 +315,7 @@ class Supervisor:
                     target()
                     return
                 except Exception as error:  # pylint: disable=broad-exception-caught
-                    self.show_notification(f"{target.__name__} failed: {error!r}")
+                    self.show_notification(f"{name} thread failed: {error!r}")
                     time.sleep(1)
 
         return run

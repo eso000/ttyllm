@@ -103,10 +103,10 @@ python3 -m unittest discover -s tests
 | File            | Purpose                                              |
 | --------------- | ---------------------------------------------------- |
 | `__main__.py`   | entry point and CLI flags                            |
-| `supervisor.py` | threads, buffers, and wiring of the parts below      |
+| `supervisor.py` | buffers and their operations, request scheduling, threads |
 | `input_handler.py` | keystrokes to commands, line edits, scrolling, approvals |
 | `completion.py` | tab completion of model names and file paths         |
-| `commands.py`   | the `:` / `/` commands and the help screen           |
+| `commands.py`   | the `:` / `/` command table and the help screen      |
 | `request_queue.py` | serialises reply requests, one buffer at a time   |
 | `terminal.py`   | raw input mode and alternate screen handling         |
 | `state.py`      | `UIState`: view mode, scroll, command line, notification |
