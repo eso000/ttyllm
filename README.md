@@ -19,7 +19,8 @@ HTTP library standing between you and the wire protocol.
 - **Streaming replies** rendered live in a box-drawn TUI.
 - **Multiple buffers** — split, create, switch, and delete independent chats;
   requests are queued and processed one at a time.
-- **Tool calls** (opt-in) with per-buffer `y`/`n` approval before execution.
+- **Tool calls** (opt-in) with per-buffer `y`/`n` approval before execution —
+  including shell commands, so see the [security note](#usage) under Usage.
 - **Images** — attach base64-encoded images to the current message.
 - **Model management** — list models from the server, switch models per
   buffer, tune sampling options.
@@ -44,6 +45,14 @@ python3 . -t         # enable tool calling (asks for approval before running)
 
 Type a message and press <kbd>Enter</kbd> to send. Start a line with `:` or
 `/` to enter command mode; `:q` quits, `:h` shows the in-app help.
+
+> **⚠️ Shell command execution:** When tool calling is enabled (`-t`), the
+> built-in `run_shell_command` tool can execute arbitrary commands on your
+> machine with your user's permissions. Every tool call is shown with its
+> arguments and must be explicitly approved with <kbd>y</kbd> before it runs,
+> but you should read each command carefully before approving it. Enable `-t`
+> only with models and prompts you trust, and ideally run it inside a sandbox
+> or container.
 
 ### Key bindings
 
