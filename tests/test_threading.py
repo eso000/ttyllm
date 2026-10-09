@@ -170,7 +170,7 @@ class TestInput(unittest.TestCase):
         os.close(write_fd)
         stdin = mock.Mock()
         stdin.fileno.return_value = read_fd
-        with mock.patch.object(supervisor_module.sys, "stdin", stdin):
+        with mock.patch.object(sys, "stdin", stdin):
             thread = threading.Thread(target=sv.get_input)
             thread.start()
             thread.join(2)

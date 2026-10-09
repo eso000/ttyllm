@@ -1,21 +1,17 @@
-import codecs
-import sys
 import threading
 import time
 import signal
-import select
-import os
 import types
 from collections.abc import Callable
-from glob import glob
 from typing import Any
 
 from box_drawing import clean_screen
 from buffer import Buffer
 from commands import Commands
+from input_handler import InputHandler
 from request_queue import RequestQueue
 from requester import Model, Requester
-from state import UIState, ViewMode
+from state import UIState
 from terminal import raw_terminal
 from view import View
 
@@ -48,6 +44,7 @@ class Supervisor:
         self.report_models()
 
         self.commands: Commands = Commands(self)
+        self.keyboard: InputHandler = InputHandler(self)
         self.view: View = View(
             self.ui, self.commands.help_text, lambda: self.models_short
         )
@@ -190,77 +187,9 @@ class Supervisor:
             else:
                 self.handle_new_message()
 
-    def _handle_escape_sequence(self) -> None:
-        """read the rest of an escape sequence and scroll with the arrow keys"""
-        fd = sys.stdin.fileno()
-        buffer = ""
-        ch: int | str = 27
-        r, _, _ = select.select([fd], [], [], 0.0)
-        if len(r) == 0:
-            return
-        while ch not in ("A", "B", "C", "D", "~"):
-            ch = os.read(fd, 1).decode()
-            if ord(ch) == 27:
-                return
-            buffer += ch
-
-        if buffer == "[A" or buffer.startswith("OA"):
-            self.ui.scroll_up()
-        if buffer == "[B" or buffer.startswith("OB"):
-            self.ui.scroll_down()
-        if buffer == "[D":
-            self.ui.scroll_to_end()
-        if buffer == "[C":
-            self.ui.scroll_to_top()
-
-        with self.current_buffer.cond:
-            self.current_buffer.updated = True
-            self.current_buffer.cond.notify()
-
     def update_command(self) -> None:
         """draw the status line, or the command line while a command is typed"""
         self.view.draw_command_line(self.buffers, self.current_buffer_id)
-
-    def _auto_complete(self) -> None:
-        """complete model names and file paths when tab is pressed"""
-        if self.ui.command != "":
-            command_tokens = self.ui.command.split(" ")
-            if len(command_tokens) < 2:
-                return
-            possible_completions: list[str] = []
-            match command_tokens[0]:
-                case ":sm" | "/sm":
-                    possible_completions = [
-                        x for x in self.models_list if x.startswith(command_tokens[1])
-                    ]
-                case ":e" | "/e" | ":i" | "/i" | ":image" | "/image":
-
-                    def _dir_completion(path: str) -> str:
-                        """append a slash so directories complete to a prefix"""
-                        if not os.path.isdir(path):
-                            return path
-                        if path[-1] == "/":
-                            return path
-                        return path + "/"
-
-                    possible_completions = [
-                        _dir_completion(path) for path in glob(f"{command_tokens[1]}*")
-                    ]
-
-            if len(possible_completions) == 0:
-                return
-            if len(possible_completions) == 1:
-                self.ui.command += possible_completions[0][len(command_tokens[1]) :]
-                self.update_command()
-                return
-            common_prefix = possible_completions[0]
-            for string in possible_completions:
-                while not string.startswith(common_prefix):
-                    common_prefix = common_prefix[:-1]
-                if common_prefix == "":
-                    return
-            self.ui.command += common_prefix[len(command_tokens[1]) :]
-            self.update_command()
 
     def stop(self) -> None:
         """end the chat: cancel requests and wake every waiting thread"""
@@ -274,107 +203,15 @@ class Supervisor:
         with self.input_cond:
             self.input_cond.notify()
 
+    def submit_input(self) -> None:
+        """tell the watcher thread that a command or message was submitted"""
+        with self.input_cond:
+            self.input_done = True
+            self.input_cond.notify()
+
     def get_input(self) -> None:
         """input thread: turn raw keystrokes into commands, edits and approvals"""
-        fd = sys.stdin.fileno()
-        decoder = codecs.getincrementaldecoder("utf-8")("replace")
-        while self.run:
-            data = os.read(fd, 1)
-            if not data:
-                self.stop()
-                return
-            ch = decoder.decode(data)
-            if not ch:
-                continue
-            if self.ui.dismiss_notification():
-                self.current_buffer.notify()
-                continue
-            if (
-                ch in ("y", "n")
-                and self.ui.mode is ViewMode.NORMAL
-                and self.ui.command == ""
-                and self.current_buffer.awaiting_approval
-            ):
-                self.decide_tool_call(ch == "y")
-                continue
-            with self.input_cond:
-                match ord(ch):
-                    case 19:
-                        self.commands.split()
-                    case 2:
-                        self.commands.create_buffer()
-                    case 4:
-                        self.commands.buffer_delete()
-                    case 14:
-                        self.commands.buffer_next()
-                    case 16:
-                        self.commands.buffer_previous()
-                    case 18:
-                        self.commands.redo()
-                    case 5:
-                        self.commands.undo()
-                    case 17:
-                        if self.ui.command == "":
-                            self.ui.command = "/"
-                        else:
-                            self.ui.command = ""
-                        self.update_command()
-                    case 21:
-                        if self.ui.command:
-                            self.ui.command = ""
-                            self.current_buffer.notify()
-                        else:
-                            self.current_buffer.clear_msg()
-                    case 27:
-                        self._handle_escape_sequence()
-                        continue
-                    case 3:
-                        self.handle_sigint()
-                    case 127:
-                        if self.ui.command != "":
-                            self.ui.command = self.ui.command[:-1]
-                            self.update_command()
-                            if self.ui.command == "":
-                                with self.current_buffer.cond:
-                                    self.current_buffer.updated = True
-                                    self.current_buffer.cond.notify()
-                        else:
-                            self.ui.show_chat()
-                            self.current_buffer.del_open()
-                        continue
-                    case 9:
-                        self._auto_complete()
-
-                if not ch or ch == "\r" or ch == "\n":
-                    if self.ui.command != "":
-                        if self.ui.command in ("/q", ":q"):
-                            self.stop()
-                        self.update_command()
-                        self.input_done = True
-                        self.input_cond.notify()
-                    else:
-                        if self.ui.mode is ViewMode.NORMAL:
-                            self.input_done = True
-                            self.input_cond.notify()
-                        else:
-                            self.ui.show_chat()
-                            self.current_buffer.notify()
-                if ch.isprintable():
-                    idle, last_empty = self.current_buffer.currently_typed()
-                    if (last_empty or not idle) and self.ui.command == "" and ch in (
-                        "/",
-                        ":",
-                    ):
-                        self.ui.command = ch
-                        self.update_command()
-                    elif idle and self.ui.command == "":
-                        self.ui.show_chat()
-                        self.current_buffer.add_open(ch)
-                    elif len(self.ui.command) > 0:
-                        self.ui.command += ch
-                        self.update_command()
-                    else:
-                        continue
+        self.keyboard.run()
 
     def update_buffer(self) -> None:
         """render thread: redraw the view whenever the buffer changes"""
