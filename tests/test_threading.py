@@ -11,7 +11,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import supervisor as supervisor_module
 from buffer import Buffer
 from requester import Requester
-from supervisor import Queue, Supervisor
+from request_queue import RequestQueue
+from supervisor import Supervisor
 from test_requester import _http_response, _serve_once
 
 
@@ -137,13 +138,13 @@ class TestCancel(unittest.TestCase):
         chat.pipe = ()  # type: ignore[assignment]
 
 
-class TestQueue(unittest.TestCase):
+class TestRequestQueue(unittest.TestCase):
     def test_concurrent_schedule_enqueues_once(self) -> None:
         old_interval = sys.getswitchinterval()
         sys.setswitchinterval(1e-6)
         self.addCleanup(sys.setswitchinterval, old_interval)
         for _ in range(100):
-            queue = Queue()
+            queue = RequestQueue()
             chat = Buffer()
             barrier = threading.Barrier(8)
 
