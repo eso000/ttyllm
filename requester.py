@@ -290,26 +290,30 @@ class Requester:
                 self._handle_tool_call(chat, body["message"]["tool_calls"])
                 return (body["done"], True)
             return (body["done"], False)
-        if "message" in body["choices"][0]:
-            msg = body["choices"][0]["message"]["content"]  # ignore choices
-        else:
-            msg = body["choices"][0]["delta"].get("content", None)  # ignore choices
-        done = body["choices"][0]["finish_reason"] == "stop"
-        if msg is not None:
-            chat.add_ai(msg)
-        if "usage" in body:
-            chat.set_tokens(body["usage"]["total_tokens"])
+        # choices is empty on the trailing usage-only chunk sent when
+        # stream_options: {"include_usage": true} is set
+        choices = body.get("choices") or []
+        _tool_calls = None
+        done = False
+        if choices:
+            choice = choices[0]  # only the first choice is rendered
+            if "message" in choice:
+                msg = choice["message"]["content"]
+                _tool_calls = choice["message"].get("tool_calls", None)
+            else:
+                msg = choice["delta"].get("content", None)
+                _tool_calls = choice["delta"].get("tool_calls", None)
+            done = choice["finish_reason"] == "stop"
+            if msg is not None:
+                chat.add_ai(msg)
+
+        # "usage" is null on every chunk except the final one
+        usage = body.get("usage")
+        if usage:
+            chat.set_tokens(usage["total_tokens"])
         elif done:
             chat.set_tokens(chat.estimate_tokens())
 
-        if "message" in body["choices"][0]:
-            _tool_calls = body["choices"][0]["message"].get(
-                "tool_calls", None
-            )  # ignore choices
-        else:
-            _tool_calls = body["choices"][0]["delta"].get(
-                "tool_calls", None
-            )  # ignore choices
         if _tool_calls:
             self._handle_tool_call(chat, _tool_calls, tool_calls_collection)
             return (done, tool_calls_collection is None)
@@ -388,9 +392,9 @@ class Requester:
 
             if "content-type: text/event-stream" in raw[0].lower():
                 body = raw[1].splitlines()
-                done = False
+                finished = False
                 tool_calls_collection: dict[Any, dict[str, Any]] = {}
-                while not done and not chat.cancel:
+                while not finished and not chat.cancel:
                     body = [x for x in body if x != ""]
 
                     if len(body) == 0:
@@ -425,9 +429,9 @@ class Requester:
                         continue
                     while len(body) > 0 and "data:" in body[0]:
                         if body[0].startswith("data: [DONE]"):
-                            done = True
+                            finished = True
                             break
-                        done, call = self._handle_msg(
+                        _, call = self._handle_msg(
                             chat, json.loads(body[0][6:]), tool_calls_collection
                         )
                         if call:

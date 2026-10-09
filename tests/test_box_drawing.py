@@ -5,7 +5,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from box_drawing import make_text_box, text_to_lines
-from buffer import Buffer
+from buffer import Buffer, ColorCodeException
 
 SAMPLES: list[str] = [
     "hi there friend",
@@ -84,6 +84,35 @@ class TestTextToLines(unittest.TestCase):
 
     def test_negative_width_returns_empty_line(self) -> None:
         self.assertEqual(text_to_lines("hello", -3), [""])
+
+
+class TestColorParsing(unittest.TestCase):
+    def setUp(self) -> None:
+        self.buffer = Buffer()
+
+    def _set_color(self, value: str) -> str:
+        self.buffer.ai_color = value
+        return self.buffer.ai_color
+
+    def test_rgb_allows_zero_components(self) -> None:
+        self.assertEqual(self._set_color("rgb:0;0;0"), "\033[38;2;0;0;0m")
+        self.assertEqual(self._set_color("rgb:0;128;255"), "\033[38;2;0;128;255m")
+
+    def test_rgb_allows_255(self) -> None:
+        self.assertEqual(self._set_color("rgb:255;255;255"), "\033[38;2;255;255;255m")
+
+    def test_rgb_rejects_out_of_range(self) -> None:
+        for value in ("rgb:256;0;0", "rgb:0;0;999", "rgb:-1;0;0"):
+            with self.assertRaises(ColorCodeException):
+                self._set_color(value)
+
+    def test_8bit_and_256bit_still_work(self) -> None:
+        self.assertEqual(self._set_color("8b:5"), "\033[35m")
+        self.assertEqual(self._set_color("256b:200"), "\033[38;5;200m")
+
+    def test_garbage_is_rejected(self) -> None:
+        with self.assertRaises(ColorCodeException):
+            self._set_color("rgb:1;2")
 
 
 class TestMakeTextBox(unittest.TestCase):

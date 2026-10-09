@@ -7,7 +7,7 @@ toolchain: list[Tool] = []
 
 def read_file(file_path: str) -> str:
     """return the contents of a file"""
-    with open(file_path, "r") as file:
+    with open(file_path, "r", encoding="utf-8") as file:
         return file.read()
 
 

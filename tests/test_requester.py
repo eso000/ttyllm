@@ -28,6 +28,21 @@ def _http_response(payload: Any, content_type: str = "application/json") -> byte
     return head + body
 
 
+def _sse_response(*events: str) -> bytes:
+    """build a chunked text/event-stream http response from raw sse events"""
+    chunks = b"".join(
+        f"{len(event.encode()):x}\r\n".encode() + event.encode() + b"\r\n"
+        for event in events
+    )
+    head = (
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: text/event-stream\r\n"
+        "Transfer-Encoding: chunked\r\n"
+        "\r\n"
+    ).encode()
+    return head + chunks + b"0\r\n\r\n"
+
+
 def _serve_once(response: bytes) -> tuple[int, threading.Thread]:
     """start a one-shot http server, return its port"""
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -199,6 +214,56 @@ class TestReplyErrors(unittest.TestCase):
 
         requester._get_header = cancelled_header  # type: ignore
         self.assertIsNone(requester.get_reply(chat))
+
+
+class TestStreamingUsage(unittest.TestCase):
+    def test_usage_only_chunk_is_not_a_choice(self) -> None:
+        # OpenAI sends the usage chunk after finish_reason: "stop", with an
+        # empty choices array; it must not be parsed as a choice
+        requester = Requester()
+        chat = Buffer()
+        chat.in_request = True
+        chat.add_msg("assistant")
+        done, call = requester._handle_msg(
+            chat,
+            {
+                "choices": [],
+                "usage": {"prompt_tokens": 19, "completion_tokens": 10,
+                          "total_tokens": 29},
+            },
+        )
+        self.assertFalse(done)
+        self.assertFalse(call)
+        self.assertEqual(chat.tokens, 29)
+
+    def test_streamed_reply_reports_server_token_usage(self) -> None:
+        port, _ = _serve_once(
+            _sse_response(
+                'data: {"choices":[{"delta":{"content":"Hello"},'
+                '"finish_reason":null}],"usage":null}\n\n',
+                'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n',
+                'data: {"choices":[],"usage":{"prompt_tokens":19,'
+                '"completion_tokens":10,"total_tokens":29}}\n\n',
+                "data: [DONE]\n\n",
+            )
+        )
+        chat = Buffer()
+        error = Requester(port=port, open_api=True).get_reply(chat)
+        self.assertIsNone(error)
+        self.assertEqual(chat.tokens, 29)
+        self.assertEqual(chat.chat_data["messages"][-2]["content"], "Hello")
+
+    def test_openai_stream_requests_usage(self) -> None:
+        chat = Buffer()
+        chat.chat_data["stream"] = True
+        self.assertEqual(
+            chat.openai_data["stream_options"], {"include_usage": True}
+        )
+
+    def test_openai_non_stream_omits_stream_options(self) -> None:
+        chat = Buffer()
+        chat.chat_data["stream"] = False
+        self.assertNotIn("stream_options", chat.openai_data)
 
 
 class TestNotification(unittest.TestCase):

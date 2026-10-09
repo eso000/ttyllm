@@ -96,8 +96,9 @@ class Buffer:  # pylint: disable=R0902, R0904
             "top_p": self.top_p,
             "temperature": self.temperature,
             "frequency_penalty": self.repeat_penalty,
-            "stream_options": {"inclide_usage": True},
         }
+        if self.chat_data["stream"]:
+            data["stream_options"] = {"include_usage": True}
         if self.TOOLS:
             data["tool_choice"] = "auto"
             data["tools"] = self.chat_data["tools"]
@@ -413,7 +414,8 @@ class Buffer:  # pylint: disable=R0902, R0904
         """turn 8b, 256b or rgb notation into an ANSI color code"""
         pattern_8bit = re.compile("^8b:[0-9]$")
         pattern_256bit = re.compile("^256b:[0-9]{1,3}$")
-        pattern_rgb = re.compile("^rgb:[1-9]{1,3};[0-9]{1,3};[0-9]{1,3}$")
+        octet = r"(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])"
+        pattern_rgb = re.compile(rf"^rgb:{octet};{octet};{octet}$")
         if pattern_8bit.match(value):
             return f"\033[3{value[-1]}m"
         if pattern_256bit.match(value):
