@@ -108,7 +108,14 @@ class TestColorParsing(unittest.TestCase):
 
     def test_8bit_and_256bit_still_work(self) -> None:
         self.assertEqual(self._set_color("8b:5"), "\033[35m")
+        self.assertEqual(self._set_color("256b:0"), "\033[38;5;0m")
         self.assertEqual(self._set_color("256b:200"), "\033[38;5;200m")
+        self.assertEqual(self._set_color("256b:255"), "\033[38;5;255m")
+
+    def test_256bit_rejects_out_of_range(self) -> None:
+        for value in ("256b:256", "256b:300", "256b:999"):
+            with self.assertRaises(ColorCodeException):
+                self._set_color(value)
 
     def test_garbage_is_rejected(self) -> None:
         with self.assertRaises(ColorCodeException):

@@ -66,8 +66,35 @@ class Buffer:  # pylint: disable=R0902, R0904
     def openai_data(self) -> dict[str, Any]:
 
         """chat data translated into the OpenAI API request format"""
-        def to_open_ai_msg(m: dict[str, Any]) -> Any:
-            """one message as OpenAI content, images become data urls"""
+        def to_open_ai_msg(m: dict[str, Any]) -> dict[str, Any]:
+            """one message in OpenAI chat format, images become data urls"""
+            if m["role"] == "tool":
+                return {
+                    "role": "tool",
+                    "tool_call_id": m.get("id"),
+                    "content": m.get("content", ""),
+                }
+            if m["role"] == "assistant" and m.get("tool_calls"):
+                calls: list[dict[str, Any]] = []
+                for call in m["tool_calls"]:
+                    _args = call["function"].get("arguments")
+                    calls.append(
+                        {
+                            "id": call.get("id"),
+                            "type": "function",
+                            "function": {
+                                "name": call["function"]["name"],
+                                "arguments": (
+                                    _args if isinstance(_args, str) else json.dumps(_args)
+                                ),
+                            },
+                        }
+                    )
+                return {
+                    "role": "assistant",
+                    "content": m.get("content", ""),
+                    "tool_calls": calls,
+                }
             non_text_content: list[dict[str, Any]] = []
             if "images" in m:
                 for img in m["images"]:
@@ -81,17 +108,14 @@ class Buffer:  # pylint: disable=R0902, R0904
                 non_text_content.append(
                     {"type": "text", "text": m["content"]},
                 )
-                return non_text_content
-            return m["content"]
+                return {"role": m["role"], "content": non_text_content}
+            return {"role": m["role"], "content": m["content"]}
 
         data: dict[str, Any] = {
             "model": self.chat_data["model"],
             "stream": self.chat_data["stream"],
             "think": self.chat_data["think"],
-            "messages": [
-                {"role": msg["role"], "content": to_open_ai_msg(msg)}
-                for msg in self.chat_data["messages"]
-            ],
+            "messages": [to_open_ai_msg(msg) for msg in self.chat_data["messages"]],
             "top_k": self.top_k,
             "top_p": self.top_p,
             "temperature": self.temperature,
@@ -412,9 +436,9 @@ class Buffer:  # pylint: disable=R0902, R0904
 
     def _process_color(self, value: str) -> str:
         """turn 8b, 256b or rgb notation into an ANSI color code"""
-        pattern_8bit = re.compile("^8b:[0-9]$")
-        pattern_256bit = re.compile("^256b:[0-9]{1,3}$")
         octet = r"(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])"
+        pattern_8bit = re.compile("^8b:[0-9]$")
+        pattern_256bit = re.compile(rf"^256b:{octet}$")
         pattern_rgb = re.compile(rf"^rgb:{octet};{octet};{octet}$")
         if pattern_8bit.match(value):
             return f"\033[3{value[-1]}m"
@@ -457,7 +481,7 @@ class Buffer:  # pylint: disable=R0902, R0904
         for msg in data["messages"]:
             if _check_dict(msg, "role", str):
                 return
-            if not _check_dict(msg, "content", str) and not _check_dict(
+            if _check_dict(msg, "content", str) and _check_dict(
                 msg, "tool_calls", list
             ):
                 return

@@ -196,21 +196,25 @@ class Requester:
     ) -> None:
         """collect streamed tool call fragments, or queue complete calls for approval"""
         if collection is not None:
-            _id = tcalls[0].get("id", None)
-            _index = tcalls[0].get("index", None)
-            _type = tcalls[0].get("type", None)
-
-            if _type:
-                collection[_index] = {
-                    "id": _id,
-                    "index": _index,
-                    "function": tcalls[0]["function"],
-                }
-            else:
-                _fragment = tcalls[0]["function"]["arguments"]
-                if isinstance(_fragment, str):
-                    collection[_index]["function"]["arguments"] += _fragment
-
+            for tc in tcalls:
+                index = tc.get("index", 0)
+                entry = collection.setdefault(
+                    index,
+                    {
+                        "id": tc.get("id"),
+                        "index": index,
+                        "type": "function",
+                        "function": {"name": "", "arguments": ""},
+                    },
+                )
+                if tc.get("id"):
+                    entry["id"] = tc["id"]
+                function = tc.get("function") or {}
+                if function.get("name"):
+                    entry["function"]["name"] = function["name"]
+                fragment = function.get("arguments")
+                if isinstance(fragment, str):
+                    entry["function"]["arguments"] += fragment
             return
         chat.add_ai_tool(tcalls)
         pending: list[dict[str, Any]] = []

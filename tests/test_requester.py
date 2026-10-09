@@ -266,6 +266,180 @@ class TestStreamingUsage(unittest.TestCase):
         self.assertNotIn("stream_options", chat.openai_data)
 
 
+class TestOpenAiToolMessages(unittest.TestCase):
+    def _chat(self) -> Buffer:
+        chat = Buffer()
+        chat.chat_data = {
+            "model": "m",
+            "stream": False,
+            "think": False,
+            "messages": [
+                {"role": "system", "content": "sys"},
+                {"role": "user", "content": "hi"},
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "index": 0,
+                            "function": {"name": "echo", "arguments": '{"text": "a"}'},
+                        }
+                    ],
+                },
+                {
+                    "role": "tool",
+                    "id": "call_1",
+                    "tool_name": "echo",
+                    "content": "echoed a",
+                },
+            ],
+        }
+        return chat
+
+    def test_assistant_tool_call_is_openai_shaped(self) -> None:
+        # index must not leak, arguments stay a json string, type is added
+        self.assertEqual(
+            self._chat().openai_data["messages"][2],
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "echo", "arguments": '{"text": "a"}'},
+                    }
+                ],
+            },
+        )
+
+    def test_tool_result_uses_tool_call_id(self) -> None:
+        self.assertEqual(
+            self._chat().openai_data["messages"][3],
+            {"role": "tool", "tool_call_id": "call_1", "content": "echoed a"},
+        )
+
+    def test_plain_messages_are_unchanged(self) -> None:
+        messages = self._chat().openai_data["messages"]
+        self.assertEqual(messages[0], {"role": "system", "content": "sys"})
+        self.assertEqual(messages[1], {"role": "user", "content": "hi"})
+
+    def test_dict_arguments_are_serialized(self) -> None:
+        chat = self._chat()
+        chat.chat_data["messages"][2]["tool_calls"][0]["function"]["arguments"] = {
+            "text": "a"
+        }
+        call = chat.openai_data["messages"][2]["tool_calls"][0]
+        self.assertEqual(call["function"]["arguments"], '{"text": "a"}')
+
+
+class TestOpenAiToolStreaming(unittest.TestCase):
+    def test_fragmented_arguments_are_accumulated(self) -> None:
+        requester_ = Requester()
+        collection: dict[Any, dict[str, Any]] = {}
+        for frame in (
+            [
+                {
+                    "index": 0,
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "echo", "arguments": ""},
+                }
+            ],
+            [{"index": 0, "function": {"arguments": '{"text":'}}],
+            [{"index": 0, "function": {"arguments": '"a"}'}}],
+        ):
+            requester_._handle_tool_call(Buffer(), frame, collection)
+        call = collection[0]
+        self.assertEqual(call["id"], "call_1")
+        self.assertEqual(call["type"], "function")
+        self.assertEqual(call["function"]["name"], "echo")
+        self.assertEqual(call["function"]["arguments"], '{"text":"a"}')
+
+    def test_first_delta_without_type_is_initialized(self) -> None:
+        # some servers omit "type" on the first delta
+        requester_ = Requester()
+        collection: dict[Any, dict[str, Any]] = {}
+        requester_._handle_tool_call(
+            Buffer(),
+            [
+                {
+                    "index": 0,
+                    "id": "call_9",
+                    "function": {"name": "echo", "arguments": ""},
+                }
+            ],
+            collection,
+        )
+        requester_._handle_tool_call(
+            Buffer(), [{"index": 0, "function": {"arguments": "{}"}}], collection
+        )
+        self.assertEqual(collection[0]["id"], "call_9")
+        self.assertEqual(collection[0]["function"]["arguments"], "{}")
+
+    def test_multiple_calls_in_one_delta(self) -> None:
+        requester_ = Requester()
+        collection: dict[Any, dict[str, Any]] = {}
+        requester_._handle_tool_call(
+            Buffer(),
+            [
+                {
+                    "index": 0,
+                    "id": "a",
+                    "type": "function",
+                    "function": {"name": "echo", "arguments": "{}"},
+                },
+                {
+                    "index": 1,
+                    "id": "b",
+                    "type": "function",
+                    "function": {"name": "echo", "arguments": "{}"},
+                },
+            ],
+            collection,
+        )
+        self.assertEqual(sorted(collection), [0, 1])
+        self.assertEqual([collection[i]["id"] for i in (0, 1)], ["a", "b"])
+
+    def test_streamed_call_round_trips_to_openai(self) -> None:
+        requester_ = Requester()
+        collection: dict[Any, dict[str, Any]] = {}
+        for frame in (
+            [
+                {
+                    "index": 0,
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "echo", "arguments": ""},
+                }
+            ],
+            [{"index": 0, "function": {"arguments": '{"text":"a"}'}}],
+        ):
+            requester_._handle_tool_call(Buffer(), frame, collection)
+        chat = Buffer()
+        chat.chat_data = {
+            "model": "m",
+            "stream": False,
+            "think": False,
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": list(collection.values()),
+                },
+                {"role": "tool", "id": "call_1", "tool_name": "echo",
+                 "content": "echoed a"},
+            ],
+        }
+        messages = chat.openai_data["messages"]
+        self.assertEqual(messages[0]["tool_calls"][0]["id"], "call_1")
+        self.assertEqual(
+            messages[0]["tool_calls"][0]["function"]["arguments"], '{"text":"a"}'
+        )
+        self.assertEqual(messages[1]["tool_call_id"], "call_1")
+
+
 class TestNotification(unittest.TestCase):
     def setUp(self) -> None:
         self.supervisor = Supervisor.__new__(Supervisor)
