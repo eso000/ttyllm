@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import supervisor as supervisor_module
 import view as view_module
 from buffer import Buffer
-from models import Model
+from models import Model, ModelList
 from requester import Requester
 from supervisor import Supervisor
 from test_input_handler import stdin_with
@@ -35,7 +35,7 @@ class TestConstruction(unittest.TestCase):
         register.assert_not_called()
         self.assertEqual(out.getvalue(), "")
         self.assertEqual(sv.ui.notification, "")
-        self.assertEqual(sv.models_list, [])
+        self.assertEqual(sv.models.names, [])
 
     def test_a_new_supervisor_has_one_empty_buffer_and_nothing_queued(self) -> None:
         sv = Supervisor()
@@ -254,9 +254,9 @@ class TestRunChat(unittest.TestCase):
         return self.previous_handler
 
     def _get_models(self, models: list[Model]) -> mock._patch[mock.MagicMock]:
-        def get_models() -> list[Model]:
+        def get_models() -> ModelList:
             self.events.append("models")
-            return models
+            return ModelList(models)
 
         return mock.patch.object(Requester, "get_models", side_effect=get_models)
 
@@ -267,8 +267,8 @@ class TestRunChat(unittest.TestCase):
     def test_models_are_loaded_before_the_terminal_is_taken_over(self) -> None:
         self._run([Model("llama3.2")])
         self.assertLess(self.events.index("models"), self.events.index("terminal in"))
-        self.assertEqual(self.sv.models_list, ["llama3.2"])
-        self.assertIn("llama3.2", self.sv.models_short)
+        self.assertEqual(self.sv.models.names, ["llama3.2"])
+        self.assertIn("llama3.2", self.sv.models.short)
 
     def test_a_server_problem_is_reported_on_start(self) -> None:
         self._run([])

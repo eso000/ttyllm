@@ -3,58 +3,74 @@ import os
 import re
 import select
 import json
+import ssl
 from typing import Any
+from urllib.parse import urlsplit
 
 from buffer import Buffer
-from models import Model
+from models import ModelList
 from tool import Tool
 import toolchain
 
 
-def _parse_models(data: Any) -> list[Model]:
-    """parse the model list out of an Ollama or OpenAI API response"""
-    if not isinstance(data, dict):
-        return []
-    if isinstance(data.get("data"), list):  # openai api: names only
-        return [Model(name=model["id"]) for model in data["data"] if "id" in model]
-    if isinstance(data.get("models"), list):  # ollama api
-        parsed: list[Model] = []
-        for model in data["models"]:
-            if "name" not in model:
-                continue
-            size = model.get("size")
-            details = model.get("details") or {}
-            parsed.append(
-                Model(
-                    name=model["name"],
-                    size_gb=size // 1073741824 if size is not None else None,
-                    parameter_size=details.get("parameter_size"),
-                )
-            )
-        return parsed
-    return []
-
-
 class Requester:
     """raw socket HTTP client for the Ollama and OpenAI chat APIs"""
+
     MAX_TOOL_DEPTH: int = 8
 
     def __init__(
-        self, host: str = "127.0.0.1", port: int = 11434, open_api: bool = False
+        self,
+        host: str = "127.0.0.1",
+        port: int = 11434,
+        open_api: bool = False,
+        tls: bool = False,
     ) -> None:
-        """configure the client for host and port, open_api selects the OpenAI wire format"""
+        """configure the client for host and port, tls wraps the socket in TLS"""
         self.max_recv: int = 1024
         self.connect_timeout: int = 5
+        self.read_timeout: float = 60
         self.host: str = host
         self.port: int = port
         self.open_api: bool = open_api
+        self.tls: bool = tls
+        self._tls_context: ssl.SSLContext | None = None
         self.models_error: str | None = None
 
-    def set_endpoint(self, endpoint: tuple[str, int]) -> None:
-        """point the client at a different host and port"""
+    def set_endpoint(self, endpoint: tuple[str, int] | str) -> None:
+        """point the client at a new host, accepting a URL or a (host, port) tuple
+
+        a URL also selects the transport: "https://..." turns TLS on and defaults
+        to port 443, while "http://..." stays plain and defaults to port 80
+        """
+        if isinstance(endpoint, str):
+            parsed = urlsplit(endpoint if "//" in endpoint else f"//{endpoint}")
+            self.tls = parsed.scheme == "https"
+            self.host = parsed.hostname or "127.0.0.1"
+            self.port = parsed.port or (443 if self.tls else 80)
+            return
         host, port = endpoint
         self.host = host
         self.port = port
+
+    def _ssl_context(self) -> ssl.SSLContext:
+        """build and cache the default TLS context, reused across requests"""
+        if self._tls_context is None:
+            self._tls_context = ssl.create_default_context()
+        return self._tls_context
+
+    def _connect(self) -> socket.socket:
+        """open a TCP connection, wrapped in TLS when the endpoint uses https"""
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(self.connect_timeout)
+        try:
+            s.connect((self.host, self.port))
+            if self.tls:
+                s = self._ssl_context().wrap_socket(s, server_hostname=self.host)
+        except OSError:
+            s.close()
+            raise
+        s.settimeout(None)
+        return s
 
     def make_post(self, d: dict[str, Any]) -> str:
         """assemble a raw HTTP/1.1 POST request with a JSON body"""
@@ -74,13 +90,24 @@ class Requester:
         return request
 
     def _recv(
-        self, socket_: socket.socket, read_fd: int | None = None, max_recv: int | None = None
+        self,
+        socket_: socket.socket,
+        read_fd: int | None = None,
+        max_recv: int | None = None,
     ) -> bytes | None:
-        """receive data, or return None when the cancel pipe fires instead"""
-        r, _, _ = select.select([x for x in [socket_, read_fd] if x], [], [])
-        if read_fd in r:
-            os.read(read_fd, 64)
-            return None
+        """receive data, return None on cancel, or time out when the server goes idle"""
+        # a TLS socket can hold decrypted bytes that select() will not report
+        # as readable, so drain those before waiting on the socket again
+        pending = socket_.pending() if isinstance(socket_, ssl.SSLSocket) else 0
+        if pending == 0:
+            ready, _, _ = select.select(
+                [x for x in [socket_, read_fd] if x], [], [], self.read_timeout
+            )
+            if not ready:
+                raise TimeoutError(f"server sent no data within {self.read_timeout:g}s")
+            if read_fd in ready:
+                os.read(read_fd, 64)
+                return None
         data = socket_.recv(max_recv or self.max_recv)
         if not data:
             raise ConnectionError("connection closed by server")
@@ -88,8 +115,8 @@ class Requester:
 
     def _get_header(
         self, socket_: socket.socket, read_fd: int | None = None
-    ) -> list[str] | None:
-        """read up to the header terminator, returns headers and body or None on cancel"""
+    ) -> tuple[str, bytes] | None:
+        """read the status line and headers, keeping body bytes already received"""
         reply = self._recv(socket_, read_fd)
         if reply is None:
             return None
@@ -98,10 +125,8 @@ class Requester:
             if data is None:
                 return None
             reply += data
-        raw = reply.decode().split("\r\n\r\n")
-        if len(raw) < 2:
-            raw.append("")
-        return raw
+        head, _, body = reply.partition(b"\r\n\r\n")
+        return head.decode("utf-8", errors="replace"), body
 
     def _get_all(
         self,
@@ -123,12 +148,13 @@ class Requester:
     def _handle_json(
         self,
         socket_: socket.socket,
-        existing: list[str],
+        head: str,
+        body: bytes,
         read_fd: int | None = None,
     ) -> Any:
         """read a whole JSON body, decoding chunked or content-length framing"""
-        body = existing[1].encode()
-        if "Transfer-Encoding: chunked" in existing[0]:
+        # backends send header names in mixed case, so match the lowercased head
+        if "transfer-encoding: chunked" in head.lower():
             full = bytearray()
             while True:
                 while b"\r\n" not in body:
@@ -151,9 +177,7 @@ class Requester:
                     body = body[2:]
             ret = json.loads(full.decode("utf-8", errors="replace"))
         else:
-            match = re.search(
-                r"content-length:\s*(\d+)", existing[0], re.IGNORECASE
-            )
+            match = re.search(r"content-length:\s*(\d+)", head, re.IGNORECASE)
             if not match:
                 raise ValueError("missing content-length in response headers")
             size = int(match.group(1))
@@ -162,34 +186,35 @@ class Requester:
         socket_.close()
         return ret
 
-    def get_models(self) -> list[Model]:
+    def get_models(self) -> ModelList:
         """fetch the model list, errors are remembered in models_error"""
         self.models_error = None
         try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.settimeout(self.connect_timeout)
-                s.connect((self.host, self.port))
-                s.settimeout(None)
+            with self._connect() as s:
                 path = "/v1/models" if self.open_api else "/api/tags"
-                request = "\r\n".join(
-                    [
-                        f"GET {path} HTTP/1.1",
-                        f"HOST: {self.host}",
-                    ]
-                ) + "\r\n\r\n"
+                request = (
+                    "\r\n".join(
+                        [
+                            f"GET {path} HTTP/1.1",
+                            f"HOST: {self.host}",
+                        ]
+                    )
+                    + "\r\n\r\n"
+                )
                 s.send(request.encode())
 
                 raw = self._get_header(s)
                 if raw is None:
                     raise ConnectionError("response cancelled")
 
-                if "content-type: application/jso" not in raw[0].lower():
-                    self.models_error = f"unexpected response: {raw[0]}"
-                    return []
-                return _parse_models(self._handle_json(s, raw))
+                head, body = raw
+                if "content-type: application/jso" not in head.lower():
+                    self.models_error = f"unexpected response: {head}"
+                    return ModelList([])
+                return ModelList.from_response(self._handle_json(s, head, body))
         except (OSError, ValueError, IndexError, KeyError) as error:
             self.models_error = str(error) or error.__class__.__name__
-            return []
+            return ModelList([])
 
     def _handle_tool_call(
         self,
@@ -343,10 +368,7 @@ class Requester:
                 chat.add_msg("user")
                 return f"stopped: tool call chain exceeded {self.MAX_TOOL_DEPTH} rounds"
 
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(self.connect_timeout)
-            s.connect((self.host, self.port))
-            s.settimeout(None)
+            s = self._connect()
             with chat.cond:
                 request = self.make_post(
                     chat.openai_data if self.open_api else chat.chat_data
@@ -361,12 +383,13 @@ class Requester:
                 chat.notify()
                 return None
 
-            if "HTTP/1.1 200 OK" not in raw[0]:
+            head, body_bytes = raw
+            if "HTTP/1.1 200 OK" not in head:
                 s.close()
-                return "\n".join(raw)
+                return "\n".join([head, body_bytes.decode("utf-8", errors="replace")])
 
-            if "content-type: application/x-ndjson" in raw[0].lower():
-                body = raw[1].splitlines()
+            if "content-type: application/x-ndjson" in head.lower():
+                body = body_bytes.decode("utf-8", errors="replace").splitlines()
                 done = False
                 while not done and not chat.cancel:
                     body = [x for x in body if x != ""]
@@ -374,34 +397,30 @@ class Requester:
                         final = self._recv(s, chat.pipe[0])
                         if final is None:
                             break
-                        body = final.decode(
-                            "utf-8", errors="replace"
-                        ).splitlines()
+                        body = final.decode("utf-8", errors="replace").splitlines()
                         if len(body) == 0:
                             continue
                     try:
                         size = int(body[0], 16)
                     except (ValueError, IndexError):
-                        raise ValueError(
-                            f"invalid chunk size frame: {body[:1]!r}"
-                        )
+                        raise ValueError(f"invalid chunk size frame: {body[:1]!r}")
                     if len(body) < 2:
                         raise ValueError("incomplete ndjson frame")
                     if size != len(body[1].encode()) + 1:
                         final = self._get_all(
                             body[1].encode(), size + 2, s, chat.pipe[0]
                         )
-                        body[1] = final.decode(
-                            "utf-8", errors="replace"
-                        ).splitlines()[0]
+                        body[1] = final.decode("utf-8", errors="replace").splitlines()[
+                            0
+                        ]
                     done, call = self._handle_msg(chat, json.loads(body[1]))
                     if call:
                         break
                     body.pop(0)
                     body.pop(0)
 
-            if "content-type: text/event-stream" in raw[0].lower():
-                body = raw[1].splitlines()
+            if "content-type: text/event-stream" in head.lower():
+                body = body_bytes.decode("utf-8", errors="replace").splitlines()
                 finished = False
                 tool_calls_collection: dict[Any, dict[str, Any]] = {}
                 while not finished and not chat.cancel:
@@ -411,18 +430,14 @@ class Requester:
                         final = self._recv(s, chat.pipe[0])
                         if final is None:
                             break
-                        body = final.decode(
-                            "utf-8", errors="replace"
-                        ).splitlines()
+                        body = final.decode("utf-8", errors="replace").splitlines()
                         body = [x for x in body if x != ""]
                         if len(body) == 0:
                             continue
                     try:
                         size = int(body[0], 16)
                     except (ValueError, IndexError):
-                        raise ValueError(
-                            f"invalid chunk size frame: {body[:1]!r}"
-                        )
+                        raise ValueError(f"invalid chunk size frame: {body[:1]!r}")
 
                     if len(body) >= 2 and size != len(body[1].encode()):
                         if len(body) >= 3:
@@ -430,9 +445,7 @@ class Requester:
                         else:
                             final = body[1].encode()
                         final = self._get_all(final, size - 2, s, chat.pipe[0])
-                        body = final.decode(
-                            "utf-8", errors="replace"
-                        ).splitlines()
+                        body = final.decode("utf-8", errors="replace").splitlines()
                     else:
                         body.pop(0)
                     if len(body) == 0:
@@ -454,8 +467,8 @@ class Requester:
                     self._handle_tool_call(chat, list(tool_calls_collection.values()))
                     call = True
 
-            if "content-type: application/json" in raw[0].lower():
-                body = self._handle_json(s, raw, chat.pipe[0])
+            if "content-type: application/json" in head.lower():
+                body = self._handle_json(s, head, body_bytes, chat.pipe[0])
                 _, call = self._handle_msg(chat, body)
             s.close()
             if call:
@@ -464,7 +477,13 @@ class Requester:
                 return None  # request ends here, user approval resumes it
             chat.add_msg("user")
             return None
-        except (OSError, ValueError, json.JSONDecodeError, IndexError, KeyError) as error:
+        except (
+            OSError,
+            ValueError,
+            json.JSONDecodeError,
+            IndexError,
+            KeyError,
+        ) as error:
             with chat.cond:
                 last = chat.chat_data["messages"][-1]
                 if (

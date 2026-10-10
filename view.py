@@ -43,7 +43,7 @@ class View:
             case ViewMode.HELP:
                 return make_text_box(self.sv.commands.help_text(), width, scroll), True
             case ViewMode.MODELS:
-                return make_text_box(self.sv.models_short, width, scroll), True
+                return make_text_box(self.sv.models.short, width, scroll), True
 
     def draw(self, box: TextBox, hide_cursor: bool) -> tuple[int, int]:
         """draw the box, returns its line count and the scroll position it ended at"""

@@ -9,6 +9,7 @@ from unittest import mock
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import view as view_module
+from models import Model, ModelList
 from state import ViewMode
 from supervisor import Supervisor
 
@@ -257,7 +258,7 @@ class TestTabCompletion(unittest.TestCase):
 
     def _complete(self, command: str) -> str:
         sv = Supervisor()
-        sv.models_list = self.MODELS
+        sv.models = ModelList([Model(name) for name in self.MODELS])
         return press(command.encode() + TAB, sv).ui.command
 
     def test_model_names_complete_to_the_common_prefix(self) -> None:

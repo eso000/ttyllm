@@ -9,6 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import view as view_module
 from buffer import Buffer
+from models import Model, ModelList
 from state import ViewMode
 from supervisor import Supervisor
 
@@ -33,7 +34,7 @@ class TestCompose(ViewTestCase):
         self.buffer.chat_data["messages"].append(
             {"role": "user", "content": "hello there"}
         )
-        self.sv.models_short = "MODEL LIST"
+        self.sv.models = ModelList([Model("MODEL LIST")])
 
     def test_normal_mode_shows_the_chat_with_a_cursor(self) -> None:
         box, hide = self.view.compose(self.buffer, -1)

@@ -10,7 +10,7 @@ from box_drawing import clean_screen
 from buffer import Buffer
 from commands import Commands
 from input_handler import InputHandler
-from models import Model
+from models import ModelList
 from request_queue import RequestQueue
 from requester import Requester
 from state import UIState
@@ -34,9 +34,7 @@ class Supervisor:
 
         self.queue: RequestQueue = RequestQueue()
 
-        self.models: list[Model] = []
-        self.models_list: list[str] = []
-        self.models_short: str = ""
+        self.models: ModelList = ModelList([])
 
         self.commands: Commands = Commands(self)
         self.keyboard: InputHandler = InputHandler(self)
@@ -164,28 +162,13 @@ class Supervisor:
     def load_models(self) -> None:
         """refresh the model list and its display text"""
         self.models = self.requester.get_models()
-        self.models_list = [model.name for model in self.models]
-        self.models_short = "".join(
-            self._format_model(model) for model in self.models
-        )
-
-    @staticmethod
-    def _format_model(model: Model) -> str:
-        """one line of the model list, with size and parameters when known"""
-        if model.size_gb is None:  # openai api provides names only
-            return f"{model.name}\n"
-        return (
-            f"{model.name:<20}"
-            f"\t {model.size_gb} GB"
-            f"\t{model.parameter_size}\n"
-        )
 
     def _models_problem(self) -> str | None:
         """describe why the model list is unusable, None when it is fine"""
         endpoint = f"{self.requester.host}:{self.requester.port}"
         if self.requester.models_error:
             return f"cannot reach {endpoint} - {self.requester.models_error}"
-        if not self.models_list:
+        if not self.models:
             return f"no models found on {endpoint}"
         return None
 

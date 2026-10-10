@@ -1,9 +1,14 @@
-import os
-import sys
 import json
+import os
+import re
+import select
+import shutil
 import socket
+import ssl
+import subprocess
+import sys
+import tempfile
 import threading
-import time
 import unittest
 from typing import Any
 from unittest import mock
@@ -11,8 +16,8 @@ from unittest import mock
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import requester
-from models import Model
-from requester import Requester, _parse_models
+from models import Model, ModelList
+from requester import Requester
 from commands import Commands
 from state import UIState
 from supervisor import Supervisor
@@ -106,15 +111,77 @@ def _serve_stall(
     return port, thread
 
 
-class TestParseModels(unittest.TestCase):
+def _self_signed_cert(directory: str) -> tuple[str, str]:
+    """generate a throwaway self-signed cert for localhost with the openssl cli"""
+    certfile = os.path.join(directory, "cert.pem")
+    keyfile = os.path.join(directory, "key.pem")
+    subprocess.run(
+        [
+            "openssl",
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-keyout",
+            keyfile,
+            "-out",
+            certfile,
+            "-days",
+            "1",
+            "-subj",
+            "/CN=localhost",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    return certfile, keyfile
+
+
+def _serve_tls_once(
+    response: bytes, certfile: str, keyfile: str
+) -> tuple[int, threading.Thread]:
+    """start a one-shot https server that speaks TLS with the given certificate"""
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+    port = server.getsockname()[1]
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(certfile, keyfile)
+
+    def run() -> None:
+        try:
+            conn, _ = server.accept()
+            with context.wrap_socket(conn, server_side=True) as tls:
+                tls.recv(1024)
+                tls.sendall(response)
+        except OSError:
+            pass
+        finally:
+            server.close()
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    return port, thread
+
+
+def _unverified_context() -> ssl.SSLContext:
+    """a client context that skips verification, for the self-signed test server"""
+    context = ssl.create_default_context()
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    return context
+
+
+class TestModelListFromResponse(unittest.TestCase):
     def test_openai_provides_names_only(self) -> None:
-        models = _parse_models({"data": [{"id": "gpt-4o"}, {"id": "o1"}]})
-        self.assertEqual([m.name for m in models], ["gpt-4o", "o1"])
+        models = ModelList.from_response({"data": [{"id": "gpt-4o"}, {"id": "o1"}]})
+        self.assertEqual(models.names, ["gpt-4o", "o1"])
         self.assertTrue(all(m.size_gb is None for m in models))
         self.assertTrue(all(m.parameter_size is None for m in models))
 
     def test_ollama_provides_size_and_params(self) -> None:
-        models = _parse_models(
+        models = ModelList.from_response(
             {
                 "models": [
                     {
@@ -125,41 +192,49 @@ class TestParseModels(unittest.TestCase):
                 ]
             }
         )
-        self.assertEqual(models, [Model("llama3.2", 2, "3B")])
+        self.assertEqual(list(models), [Model("llama3.2", 2, "3B")])
 
     def test_ollama_entry_without_size(self) -> None:
-        models = _parse_models({"models": [{"name": "mystery"}]})
-        self.assertEqual(models, [Model("mystery", None, None)])
+        models = ModelList.from_response({"models": [{"name": "mystery"}]})
+        self.assertEqual(list(models), [Model("mystery", None, None)])
 
     def test_ollama_entry_with_null_details(self) -> None:
-        models = _parse_models({"models": [{"name": "m", "size": 1, "details": None}]})
-        self.assertEqual(models, [Model("m", 0, None)])
+        models = ModelList.from_response(
+            {"models": [{"name": "m", "size": 1, "details": None}]}
+        )
+        self.assertEqual(list(models), [Model("m", 0, None)])
 
     def test_missing_keys_returns_empty(self) -> None:
-        self.assertEqual(_parse_models({}), [])
-        self.assertEqual(_parse_models({"object": "list"}), [])
+        self.assertEqual(list(ModelList.from_response({})), [])
+        self.assertEqual(list(ModelList.from_response({"object": "list"})), [])
 
     def test_empty_lists_return_empty(self) -> None:
-        self.assertEqual(_parse_models({"models": []}), [])
-        self.assertEqual(_parse_models({"data": []}), [])
+        self.assertEqual(list(ModelList.from_response({"models": []})), [])
+        self.assertEqual(list(ModelList.from_response({"data": []})), [])
 
     def test_malformed_entries_are_skipped(self) -> None:
-        models = _parse_models({"models": [{"size": 1}, {"name": "ok"}]})
-        self.assertEqual([m.name for m in models], ["ok"])
-        models = _parse_models({"data": [{"nope": 1}, {"id": "ok"}]})
-        self.assertEqual([m.name for m in models], ["ok"])
+        models = ModelList.from_response({"models": [{"size": 1}, {"name": "ok"}]})
+        self.assertEqual(models.names, ["ok"])
+        models = ModelList.from_response({"data": [{"nope": 1}, {"id": "ok"}]})
+        self.assertEqual(models.names, ["ok"])
 
     def test_non_dict_returns_empty(self) -> None:
-        self.assertEqual(_parse_models(None), [])
-        self.assertEqual(_parse_models("models"), [])
+        self.assertEqual(list(ModelList.from_response(None)), [])
+        self.assertEqual(list(ModelList.from_response("models")), [])
+
+    def test_empty_model_list_is_len_zero_and_empty_short(self) -> None:
+        models = ModelList([])
+        self.assertEqual(len(models), 0)
+        self.assertEqual(models.short, "")
+        self.assertEqual(models.names, [])
 
 
-class TestFormatModel(unittest.TestCase):
+class TestModelListShort(unittest.TestCase):
     def test_openai_names_only(self) -> None:
-        self.assertEqual(Supervisor._format_model(Model("gpt-4o")), "gpt-4o\n")
+        self.assertEqual(ModelList([Model("gpt-4o")]).short, "gpt-4o\n")
 
     def test_ollama_with_size(self) -> None:
-        line = Supervisor._format_model(Model("llama3.2", 2, "3B"))
+        line = ModelList([Model("llama3.2", 2, "3B")]).short
         self.assertEqual(line, f"{'llama3.2':<20}\t 2 GB\t3B\n")
 
 
@@ -167,29 +242,36 @@ class TestGetModels(unittest.TestCase):
     def test_ollama_response(self) -> None:
         port, _ = _serve_once(
             _http_response(
-                {"models": [{"name": "llama3.2", "size": 2 * GIB,
-                             "details": {"parameter_size": "3B"}}]}
+                {
+                    "models": [
+                        {
+                            "name": "llama3.2",
+                            "size": 2 * GIB,
+                            "details": {"parameter_size": "3B"},
+                        }
+                    ]
+                }
             )
         )
         result = Requester(port=port).get_models()
-        self.assertEqual(result, [Model("llama3.2", 2, "3B")])
+        self.assertEqual(list(result), [Model("llama3.2", 2, "3B")])
         self.assertIsNone(Requester(port=port).models_error)
 
     def test_openai_response(self) -> None:
         port, _ = _serve_once(_http_response({"data": [{"id": "gpt-4o"}]}))
         request = Requester(port=port, open_api=True)
-        self.assertEqual(request.get_models(), [Model("gpt-4o")])
+        self.assertEqual(list(request.get_models()), [Model("gpt-4o")])
         self.assertIsNone(request.models_error)
 
     def test_no_server_returns_empty_and_reports_error(self) -> None:
         request = Requester(port=_closed_port())
-        self.assertEqual(request.get_models(), [])
+        self.assertEqual(list(request.get_models()), [])
         self.assertIsNotNone(request.models_error)
 
     def test_wrong_content_type_reports_error(self) -> None:
         port, _ = _serve_once(b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n")
         request = Requester(port=port)
-        self.assertEqual(request.get_models(), [])
+        self.assertEqual(list(request.get_models()), [])
         self.assertIn("unexpected response", request.models_error)  # type: ignore[arg-type]
 
     def test_error_is_cleared_on_recovery(self) -> None:
@@ -202,25 +284,119 @@ class TestGetModels(unittest.TestCase):
         self.assertIsNone(request.models_error)
 
 
+class TestEndpoint(unittest.TestCase):
+    def test_https_url_enables_tls_on_the_default_port(self) -> None:
+        request = Requester()
+        request.set_endpoint("https://api.example.com")
+        self.assertEqual(request.host, "api.example.com")
+        self.assertEqual(request.port, 443)
+        self.assertTrue(request.tls)
+
+    def test_http_url_defaults_to_port_eighty(self) -> None:
+        request = Requester()
+        request.set_endpoint("http://api.example.com")
+        self.assertEqual(request.port, 80)
+        self.assertFalse(request.tls)
+
+    def test_url_with_explicit_port_keeps_it(self) -> None:
+        request = Requester()
+        request.set_endpoint("https://localhost:8443")
+        self.assertEqual(request.host, "localhost")
+        self.assertEqual(request.port, 8443)
+        self.assertTrue(request.tls)
+
+    def test_bare_host_and_port_stays_plain(self) -> None:
+        request = Requester()
+        request.set_endpoint("localhost:11434")
+        self.assertEqual(request.host, "localhost")
+        self.assertEqual(request.port, 11434)
+        self.assertFalse(request.tls)
+
+    def test_tuple_only_changes_host_and_port(self) -> None:
+        request = Requester(tls=True)
+        request.set_endpoint(("127.0.0.1", 11434))
+        self.assertEqual(request.host, "127.0.0.1")
+        self.assertEqual(request.port, 11434)
+        self.assertTrue(request.tls)
+
+
+class TestConnect(unittest.TestCase):
+    def test_plain_connection_is_returned_as_is(self) -> None:
+        request = Requester(host="127.0.0.1", port=11434)
+        with mock.patch("requester.socket.socket") as socket_mock:
+            raw = socket_mock.return_value
+            self.assertIs(request._connect(), raw)
+        raw.connect.assert_called_once_with(("127.0.0.1", 11434))
+
+    def test_tls_connection_is_wrapped_with_the_server_name(self) -> None:
+        request = Requester(host="api.example.com", port=443, tls=True)
+        with mock.patch("requester.socket.socket") as socket_mock, mock.patch(
+            "requester.ssl.create_default_context"
+        ) as context_mock:
+            raw = socket_mock.return_value
+            wrapped = context_mock.return_value.wrap_socket.return_value
+            self.assertIs(request._connect(), wrapped)
+        context_mock.return_value.wrap_socket.assert_called_once_with(
+            raw, server_hostname="api.example.com"
+        )
+
+    def test_tls_context_is_built_once(self) -> None:
+        request = Requester(host="api.example.com", tls=True)
+        with mock.patch("requester.socket.socket"), mock.patch(
+            "requester.ssl.create_default_context"
+        ) as context_mock:
+            request._connect()
+            request._connect()
+        context_mock.assert_called_once()
+
+    def test_raw_socket_is_closed_when_wrapping_fails(self) -> None:
+        request = Requester(host="api.example.com", tls=True)
+        with mock.patch("requester.socket.socket") as socket_mock, mock.patch(
+            "requester.ssl.create_default_context"
+        ) as context_mock:
+            raw = socket_mock.return_value
+            context_mock.return_value.wrap_socket.side_effect = OSError("tls failed")
+            with self.assertRaises(OSError):
+                request._connect()
+        raw.close.assert_called_once()
+
+
+@unittest.skipUnless(shutil.which("openssl"), "the openssl cli is required")
+class TestTlsConnection(unittest.TestCase):
+    def test_https_request_is_served_over_tls(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            certfile, keyfile = _self_signed_cert(directory)
+            port, _ = _serve_tls_once(
+                _http_response({"data": [{"id": "gpt-4o"}]}), certfile, keyfile
+            )
+            request = Requester(host="127.0.0.1", port=port, tls=True, open_api=True)
+            with mock.patch.object(
+                Requester, "_ssl_context", return_value=_unverified_context()
+            ):
+                result = request.get_models()
+        self.assertEqual(list(result), [Model("gpt-4o")])
+        self.assertIsNone(request.models_error)
+
+
 class TestSupervisorModelAttributes(unittest.TestCase):
     def test_load_models_on_unreachable_server_is_safe(self) -> None:
         supervisor = Supervisor.__new__(Supervisor)
         supervisor.requester = Requester(port=_closed_port())
         supervisor.models = None  # type: ignore[assignment]
-        supervisor.models_list = None  # type: ignore[assignment]
-        supervisor.models_short = None  # type: ignore[assignment]
         supervisor.load_models()
-        self.assertEqual(supervisor.models, [])
-        self.assertEqual(supervisor.models_list, [])
-        self.assertEqual(supervisor.models_short, "")
+        self.assertEqual(list(supervisor.models), [])
+        self.assertEqual(supervisor.models.names, [])
+        self.assertEqual(supervisor.models.short, "")
 
     def test_load_models_from_openai_names_only(self) -> None:
         supervisor = Supervisor.__new__(Supervisor)
         supervisor.requester = Requester(port=_closed_port(), open_api=True)
-        supervisor.requester.get_models = lambda: [Model("gpt-4o"), Model("o1")]  # type: ignore[method-assign]
+        supervisor.requester.get_models = lambda: ModelList(  # type: ignore[method-assign]
+            [Model("gpt-4o"), Model("o1")]
+        )
         supervisor.load_models()
-        self.assertEqual(supervisor.models_list, ["gpt-4o", "o1"])
-        self.assertEqual(supervisor.models_short, "gpt-4o\no1\n")
+        self.assertEqual(supervisor.models.names, ["gpt-4o", "o1"])
+        self.assertEqual(supervisor.models.short, "gpt-4o\no1\n")
 
 
 class TestReplyErrors(unittest.TestCase):
@@ -254,12 +430,12 @@ class TestReplyErrors(unittest.TestCase):
         port, _ = _serve_stall(connected)
         chat = Buffer()
         requester = Requester(port=port)
-        requester._get_header = lambda *_: [  # type: ignore[method-assign]
+        requester._get_header = lambda *_: (  # type: ignore[method-assign]
             "HTTP/1.1 200 OK\r\n"
             "Content-Type: application/json\r\n"
             "Content-Length: 10",
-            "",
-        ]
+            b"",
+        )
         result: list[str | None] = []
         thread = threading.Thread(
             target=lambda: result.append(requester.get_reply(chat)), daemon=True
@@ -280,6 +456,33 @@ class TestReplyErrors(unittest.TestCase):
         self.assertIn("OSError", error)  # type: ignore[arg-type]
         socket_mock.return_value.close.assert_called()
 
+    def test_idle_server_times_out(self) -> None:
+        # a server that accepts but never replies must not block forever
+        port, _ = _serve_stall()
+        request = Requester(port=port)
+        request.read_timeout = 0.2
+        error = request.get_reply(Buffer())
+        self.assertIn("TimeoutError", error)  # type: ignore[arg-type]
+
+
+class TestGetHeader(unittest.TestCase):
+    def test_body_after_header_terminator_is_kept(self) -> None:
+        # _get_header must not drop bytes that followed the first \r\n\r\n
+        client, peer = socket.socketpair()
+        self.addCleanup(client.close)
+        self.addCleanup(peer.close)
+        payload = (
+            b"HTTP/1.1 200 OK\r\n"
+            b"Content-Type: text/event-stream\r\n"
+            b"\r\n"
+            b"data: one\r\n\r\n"
+            b"data: two\r\n\r\n"
+        )
+        peer.sendall(payload)
+        head, body = Requester()._get_header(client)  # type: ignore[misc]
+        self.assertIn("HTTP/1.1 200 OK", head)
+        self.assertEqual(body, b"data: one\r\n\r\ndata: two\r\n\r\n")
+
 
 class TestStreamingUsage(unittest.TestCase):
     def test_usage_only_chunk_is_not_a_choice(self) -> None:
@@ -293,8 +496,11 @@ class TestStreamingUsage(unittest.TestCase):
             chat,
             {
                 "choices": [],
-                "usage": {"prompt_tokens": 19, "completion_tokens": 10,
-                          "total_tokens": 29},
+                "usage": {
+                    "prompt_tokens": 19,
+                    "completion_tokens": 10,
+                    "total_tokens": 29,
+                },
             },
         )
         self.assertFalse(done)
@@ -321,9 +527,7 @@ class TestStreamingUsage(unittest.TestCase):
     def test_openai_stream_requests_usage(self) -> None:
         chat = Buffer()
         chat.chat_data["stream"] = True
-        self.assertEqual(
-            chat.openai_data["stream_options"], {"include_usage": True}
-        )
+        self.assertEqual(chat.openai_data["stream_options"], {"include_usage": True})
 
     def test_openai_non_stream_omits_stream_options(self) -> None:
         chat = Buffer()
@@ -493,8 +697,12 @@ class TestOpenAiToolStreaming(unittest.TestCase):
                     "content": "",
                     "tool_calls": list(collection.values()),
                 },
-                {"role": "tool", "id": "call_1", "tool_name": "echo",
-                 "content": "echoed a"},
+                {
+                    "role": "tool",
+                    "id": "call_1",
+                    "tool_name": "echo",
+                    "content": "echoed a",
+                },
             ],
         }
         messages = chat.openai_data["messages"]
@@ -512,7 +720,7 @@ class TestNotification(unittest.TestCase):
         self.supervisor.ui = UIState()
         self.supervisor.buffers = [Buffer()]
         self.supervisor.current_buffer_id = 0
-        self.supervisor.models_list = []
+        self.supervisor.models = ModelList([])
 
     def test_unreachable_server_is_reported(self) -> None:
         self.supervisor.requester.models_error = "refused"
@@ -525,7 +733,7 @@ class TestNotification(unittest.TestCase):
         self.assertIn("no models found", self.supervisor.ui.notification)
 
     def test_models_present_stays_silent(self) -> None:
-        self.supervisor.models_list = ["llama3.2"]
+        self.supervisor.models = ModelList([Model("llama3.2")])
         self.assertFalse(self.supervisor.report_models())
         self.assertEqual(self.supervisor.ui.notification, "")
 

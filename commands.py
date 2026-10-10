@@ -141,7 +141,7 @@ class Commands:
         """fetch the model list from the server again"""
         self.sv.load_models()
         if not self.sv.report_models():
-            self.sv.show_notification(f"loaded {len(self.sv.models_list)} models")
+            self.sv.show_notification(f"loaded {len(self.sv.models)} models")
 
     def switch_model(self, *args: str) -> None:
         """switch model -- argument: model name"""

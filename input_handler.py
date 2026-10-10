@@ -121,7 +121,7 @@ class InputHandler:
         sv, ui = self.sv, self.sv.ui
         if ui.command == "":
             return
-        suffix = complete(ui.command, sv.models_list)
+        suffix = complete(ui.command, sv.models.names)
         if suffix:
             ui.command += suffix
             sv.view.draw_command_line()

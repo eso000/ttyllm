@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import view as view_module
 from input_handler import InputHandler, Key
+from models import Model, ModelList
 from test_input_keys import content, press
 from state import ViewMode
 from supervisor import Supervisor
@@ -185,7 +186,7 @@ class TestLineEditing(HandlerTestCase):
         self.assertIs(self.sv.ui.mode, ViewMode.NORMAL)
 
     def test_tab_completes_with_the_known_models(self) -> None:
-        self.sv.models_list = ["llama3.2"]
+        self.sv.models = ModelList([Model("llama3.2")])
         self.type(":sm ll\t")
         self.assertEqual(self.sv.ui.command, ":sm llama3.2")
 
