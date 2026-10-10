@@ -11,7 +11,8 @@ from unittest import mock
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import requester
-from requester import Model, Requester, _parse_models
+from models import Model
+from requester import Requester, _parse_models
 from commands import Commands
 from state import UIState
 from supervisor import Supervisor

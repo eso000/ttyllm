@@ -14,7 +14,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import supervisor as supervisor_module
 import view as view_module
 from buffer import Buffer
-from requester import Model, Requester
+from models import Model
+from requester import Requester
 from supervisor import Supervisor
 from test_input_handler import stdin_with
 

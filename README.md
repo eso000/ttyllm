@@ -113,6 +113,7 @@ python3 -m unittest discover -s tests
 | `view.py`       | renders the buffer for the current `UIState`         |
 | `buffer.py`     | per-chat state, messages, and rendering              |
 | `requester.py`  | raw-socket HTTP client and streaming parsers         |
+| `models.py`     | the server's model list entry (`Model`)              |
 | `box_drawing.py`| text box layout and wrapping                         |
 | `tool.py` / `toolchain.py` | tool definitions and available tools        |
 | `tests/`        | unit tests (unittest, no extra dependencies)         |

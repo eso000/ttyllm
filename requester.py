@@ -1,4 +1,3 @@
-import dataclasses
 import socket
 import os
 import re
@@ -7,16 +6,9 @@ import json
 from typing import Any
 
 from buffer import Buffer
+from models import Model
 from tool import Tool
 import toolchain
-
-
-@dataclasses.dataclass
-class Model:
-    """a model as reported by the server"""
-    name: str
-    size_gb: int | None = None
-    parameter_size: str | None = None
 
 
 def _parse_models(data: Any) -> list[Model]:

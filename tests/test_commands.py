@@ -10,7 +10,8 @@ from unittest import mock
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from commands import Commands
-from requester import Model, Requester
+from models import Model
+from requester import Requester
 from state import ViewMode
 from supervisor import Supervisor
 
