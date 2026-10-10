@@ -1,5 +1,6 @@
 import os
 import sys
+import threading
 import unittest
 from unittest import mock
 
@@ -128,6 +129,31 @@ class TestTakeCommand(unittest.TestCase):
         self.assertEqual(ui.take_command(), "/sm llama")
         self.assertEqual(ui.command, "")
         self.assertEqual(ui.take_command(), "")
+
+    def test_submit_marks_the_command_and_taking_it_consumes_the_mark(self) -> None:
+        ui = UIState(command="/sm llama")
+        self.assertFalse(ui.submitted)
+        ui.submit()
+        self.assertTrue(ui.submitted)
+        self.assertEqual(ui.take_command(), "/sm llama")
+        self.assertFalse(ui.submitted)
+
+    def test_submit_wakes_a_thread_waiting_for_a_command(self) -> None:
+        ui = UIState(command="/n")
+        woke = threading.Event()
+
+        def wait() -> None:
+            with ui.cond:
+                while not ui.submitted:
+                    ui.cond.wait()
+            woke.set()
+
+        thread = threading.Thread(target=wait)
+        thread.start()
+        ui.submit()
+        self.assertTrue(woke.wait(2))
+        thread.join(2)
+        self.assertFalse(thread.is_alive())
 
 
 if __name__ == "__main__":

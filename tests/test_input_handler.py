@@ -105,7 +105,7 @@ class TestHandleKey(HandlerTestCase):
             self.handler.handle_key("\x02")
         acquired: list[bool] = []
         thread = threading.Thread(
-            target=lambda: acquired.append(self.sv.input_cond.acquire(timeout=1))
+            target=lambda: acquired.append(self.sv.ui.cond.acquire(timeout=1))
         )
         thread.start()
         thread.join(2)
@@ -116,9 +116,9 @@ class TestHandleKey(HandlerTestCase):
         results: list[bool] = []
 
         def probe() -> None:
-            got = self.sv.input_cond.acquire(timeout=0.1)
+            got = self.sv.ui.cond.acquire(timeout=0.1)
             if got:
-                self.sv.input_cond.release()
+                self.sv.ui.cond.release()
             results.append(not got)
 
         thread = threading.Thread(target=probe)
@@ -199,15 +199,15 @@ class TestLineEditing(HandlerTestCase):
 class TestSubmit(HandlerTestCase):
     def test_enter_signals_the_watcher(self) -> None:
         self.type("hi\r")
-        self.assertTrue(self.sv.input_done)
+        self.assertTrue(self.sv.ui.submitted)
 
     def test_submit_wakes_a_waiting_thread(self) -> None:
         woke = threading.Event()
 
         def wait() -> None:
-            with self.sv.input_cond:
-                while not self.sv.input_done:
-                    self.sv.input_cond.wait()
+            with self.sv.ui.cond:
+                while not self.sv.ui.submitted:
+                    self.sv.ui.cond.wait()
             woke.set()
 
         thread = threading.Thread(target=wait)
@@ -220,12 +220,12 @@ class TestSubmit(HandlerTestCase):
         self.sv.run = True
         self.type(":q\r")
         self.assertFalse(self.sv.run)
-        self.assertTrue(self.sv.input_done)
+        self.assertTrue(self.sv.ui.submitted)
 
     def test_enter_in_a_view_does_not_submit(self) -> None:
         self.sv.ui.set_mode(ViewMode.HELP, 0)
         self.handler.handle_key("\r")
-        self.assertFalse(self.sv.input_done)
+        self.assertFalse(self.sv.ui.submitted)
         self.assertIs(self.sv.ui.mode, ViewMode.NORMAL)
 
 

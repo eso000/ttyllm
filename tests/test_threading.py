@@ -232,9 +232,9 @@ class TestWatcher(unittest.TestCase):
         seen = []
         sv.commands.execute = lambda command: seen.append(command)  # type: ignore
         sv.view.draw_command_line = lambda: None  # type: ignore[method-assign]
-        with sv.input_cond:
+        with sv.ui.cond:
             sv.ui.command = "/n"
-            sv.input_done = True
+            sv.ui.submitted = True
         watcher = threading.Thread(target=sv.watcher)
         watcher.start()
         deadline = time.time() + 2

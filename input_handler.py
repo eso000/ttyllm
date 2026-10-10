@@ -82,7 +82,7 @@ class InputHandler:
         ):
             sv.decide_tool_call(ch == "y")
             return
-        with sv.input_cond:
+        with sv.ui.cond:
             action = self.keys.get(ord(ch))
             if action:
                 action()
@@ -133,9 +133,9 @@ class InputHandler:
             if ui.command in QUIT_COMMANDS:
                 sv.stop()
             sv.view.draw_command_line()
-            sv.submit_input()
+            ui.submit()
         elif ui.mode is ViewMode.NORMAL:
-            sv.submit_input()
+            ui.submit()
         else:
             ui.show_chat()
             sv.current_buffer.notify()

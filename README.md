@@ -109,7 +109,7 @@ python3 -m unittest discover -s tests
 | `commands.py`   | the `:` / `/` command table and the help screen      |
 | `request_queue.py` | serialises reply requests, one buffer at a time   |
 | `terminal.py`   | raw input mode and alternate screen handling         |
-| `state.py`      | `UIState`: view mode, scroll, command line, notification |
+| `state.py`      | `UIState`: locked view mode, scroll, command line, notification |
 | `view.py`       | renders the buffer for the current `UIState`         |
 | `buffer.py`     | per-chat state, messages, and rendering              |
 | `requester.py`  | raw-socket HTTP client and streaming parsers         |

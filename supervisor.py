@@ -31,9 +31,6 @@ class Supervisor:
 
         self.run: bool = True
 
-        self.input_done: bool = False
-        self.input_cond: threading.Condition = threading.Condition()
-
         self.queue: RequestQueue = RequestQueue()
 
         self.models: list[Model] = []
@@ -225,10 +222,9 @@ class Supervisor:
     def watcher(self) -> None:
         """worker thread: dispatch submitted input to commands or to the chat"""
         while self.run:
-            with self.input_cond:
-                while not self.input_done and self.run:
-                    self.input_cond.wait()
-                self.input_done = False
+            with self.ui.cond:
+                while not self.ui.submitted and self.run:
+                    self.ui.cond.wait()
                 command = self.ui.take_command()
             if not self.run:
                 return
@@ -247,14 +243,8 @@ class Supervisor:
             self.current_buffer.cond.notify()
         with self.queue.cond:
             self.queue.cond.notify()
-        with self.input_cond:
-            self.input_cond.notify()
-
-    def submit_input(self) -> None:
-        """tell the watcher thread that a command or message was submitted"""
-        with self.input_cond:
-            self.input_done = True
-            self.input_cond.notify()
+        with self.ui.cond:
+            self.ui.cond.notify()
 
     def update_buffer(self) -> None:
         """render thread: redraw the view whenever the buffer changes"""
@@ -275,7 +265,7 @@ class Supervisor:
 
             self.view.draw_command_line()
             lines, new_scroll = self.view.draw(box, hide_cursor)
-            with self.input_cond:
+            with self.ui.cond:
                 self.ui.scroll_max = lines
                 if self.ui.scroll == scroll:  # not scrolled while drawing
                     self.ui.scroll = new_scroll

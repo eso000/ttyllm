@@ -158,15 +158,15 @@ class TestTyping(unittest.TestCase):
 class TestEnter(unittest.TestCase):
     def test_enter_submits_a_message(self) -> None:
         sv = press(b"hi\r")
-        self.assertTrue(sv.input_done)
+        self.assertTrue(sv.ui.submitted)
         self.assertEqual(content(sv), "hi")
 
     def test_newline_submits_like_enter(self) -> None:
-        self.assertTrue(press(b"hi\n").input_done)
+        self.assertTrue(press(b"hi\n").ui.submitted)
 
     def test_enter_submits_a_command_and_keeps_it_for_the_watcher(self) -> None:
         sv = press(b":bc\r")
-        self.assertTrue(sv.input_done)
+        self.assertTrue(sv.ui.submitted)
         self.assertEqual(sv.ui.command, ":bc")
 
     def test_quit_command_stops_the_app(self) -> None:
@@ -174,13 +174,13 @@ class TestEnter(unittest.TestCase):
             with self.subTest(command=command):
                 sv = press(command)
                 self.assertFalse(sv.run)
-                self.assertTrue(sv.input_done)
+                self.assertTrue(sv.ui.submitted)
 
     def test_enter_in_another_view_goes_back_to_the_chat(self) -> None:
         sv = press(b"\r", mode=ViewMode.HELP, scroll=4)
         self.assertIs(sv.ui.mode, ViewMode.NORMAL)
         self.assertEqual(sv.ui.scroll, -1)
-        self.assertFalse(sv.input_done)
+        self.assertFalse(sv.ui.submitted)
 
 
 class TestToolApproval(unittest.TestCase):

@@ -96,9 +96,9 @@ class TestCompose(ViewTestCase):
             self.ui.mode = mode
             self.ui.scroll, self.ui.scroll_max = 3, 9
             self.ui.notification = "n" if mode is ViewMode.NORMAL else ""
-            before = dataclasses.asdict(self.ui)
+            before = dataclasses.replace(self.ui)
             self.view.compose(self.buffer, self.ui.scroll)
-            self.assertEqual(dataclasses.asdict(self.ui), before, mode)
+            self.assertEqual(self.ui, before, mode)
 
     def test_the_view_follows_the_ui_state_of_the_supervisor(self) -> None:
         other = type(self.ui)(columns=50, lines=10)
