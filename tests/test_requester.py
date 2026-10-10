@@ -3,8 +3,10 @@ import sys
 import json
 import socket
 import threading
+import time
 import unittest
 from typing import Any
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -73,6 +75,34 @@ def _closed_port() -> int:
     port = sock.getsockname()[1]
     sock.close()
     return port
+
+
+def _serve_stall(
+    connected: threading.Event | None = None,
+) -> tuple[int, threading.Thread]:
+    """start a server that accepts one connection and never sends a body"""
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+    port = server.getsockname()[1]
+
+    def run() -> None:
+        try:
+            conn, _ = server.accept()
+            with conn:
+                conn.recv(1024)
+                if connected is not None:
+                    connected.set()
+                while conn.recv(1024):
+                    pass
+        except OSError:
+            pass
+        finally:
+            server.close()
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    return port, thread
 
 
 class TestParseModels(unittest.TestCase):
@@ -215,6 +245,39 @@ class TestReplyErrors(unittest.TestCase):
 
         requester._get_header = cancelled_header  # type: ignore
         self.assertIsNone(requester.get_reply(chat))
+
+    def test_cancel_interrupts_body_read(self) -> None:
+        # the server accepts but never sends the body; cancelling the request
+        # must wake the pending body read instead of blocking forever
+        connected = threading.Event()
+        port, _ = _serve_stall(connected)
+        chat = Buffer()
+        requester = Requester(port=port)
+        requester._get_header = lambda *_: [  # type: ignore[method-assign]
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: application/json\r\n"
+            "Content-Length: 10",
+            "",
+        ]
+        result: list[str | None] = []
+        thread = threading.Thread(
+            target=lambda: result.append(requester.get_reply(chat)), daemon=True
+        )
+        thread.start()
+        self.assertTrue(connected.wait(2), "server never accepted the connection")
+        chat.cancel_request()
+        thread.join(timeout=2)
+        self.assertFalse(thread.is_alive(), "get_reply did not return after cancel")
+        self.assertEqual(result, [None])
+
+    def test_socket_is_closed_when_connect_fails(self) -> None:
+        chat = Buffer()
+        request = Requester(port=_closed_port())
+        with mock.patch("requester.socket.socket") as socket_mock:
+            socket_mock.return_value.connect.side_effect = OSError("refused")
+            error = request.get_reply(chat)
+        self.assertIn("OSError", error)  # type: ignore[arg-type]
+        socket_mock.return_value.close.assert_called()
 
 
 class TestStreamingUsage(unittest.TestCase):

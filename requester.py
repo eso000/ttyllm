@@ -111,25 +111,36 @@ class Requester:
             raw.append("")
         return raw
 
-    def _get_all(self, final: bytes, size: int, socket_: socket.socket) -> bytes:
+    def _get_all(
+        self,
+        final: bytes,
+        size: int,
+        socket_: socket.socket,
+        read_fd: int | None = None,
+    ) -> bytes:
         """keep receiving until size bytes have arrived"""
         while len(final) < size:
             data = self._recv(
-                socket_, max_recv=min(self.max_recv, size - len(final))
+                socket_, read_fd, max_recv=min(self.max_recv, size - len(final))
             )
             if data is None:
                 raise ConnectionError("response cancelled")
             final += data
         return final
 
-    def _handle_json(self, socket_: socket.socket, existing: list[str]) -> Any:
+    def _handle_json(
+        self,
+        socket_: socket.socket,
+        existing: list[str],
+        read_fd: int | None = None,
+    ) -> Any:
         """read a whole JSON body, decoding chunked or content-length framing"""
         body = existing[1].encode()
         if "Transfer-Encoding: chunked" in existing[0]:
             full = bytearray()
             while True:
                 while b"\r\n" not in body:
-                    data = self._recv(socket_)
+                    data = self._recv(socket_, read_fd)
                     if data is None:
                         raise ConnectionError("response cancelled")
                     body += data
@@ -138,7 +149,7 @@ class Requester:
                 if size == 0:
                     break
                 while len(body) < size:
-                    data = self._recv(socket_)
+                    data = self._recv(socket_, read_fd)
                     if data is None:
                         raise ConnectionError("response cancelled")
                     body += data
@@ -154,7 +165,7 @@ class Requester:
             if not match:
                 raise ValueError("missing content-length in response headers")
             size = int(match.group(1))
-            final = self._get_all(body, size, socket_)
+            final = self._get_all(body, size, socket_, read_fd)
             ret = json.loads(final.decode("utf-8", errors="replace"))
         socket_.close()
         return ret
@@ -326,6 +337,7 @@ class Requester:
     def get_reply(self, chat: Buffer, wrapped: bool = False) -> str | None:
         """request a reply, returns an error message when something went wrong"""
         call = False
+        s: socket.socket | None = None
         with chat.cond:
             chat.in_request = True
             if not wrapped:
@@ -367,7 +379,7 @@ class Requester:
                 while not done and not chat.cancel:
                     body = [x for x in body if x != ""]
                     if len(body) == 0:
-                        final = self._recv(s)
+                        final = self._recv(s, chat.pipe[0])
                         if final is None:
                             break
                         body = final.decode(
@@ -384,7 +396,9 @@ class Requester:
                     if len(body) < 2:
                         raise ValueError("incomplete ndjson frame")
                     if size != len(body[1].encode()) + 1:
-                        final = self._get_all(body[1].encode(), size + 2, s)
+                        final = self._get_all(
+                            body[1].encode(), size + 2, s, chat.pipe[0]
+                        )
                         body[1] = final.decode(
                             "utf-8", errors="replace"
                         ).splitlines()[0]
@@ -402,7 +416,7 @@ class Requester:
                     body = [x for x in body if x != ""]
 
                     if len(body) == 0:
-                        final = self._recv(s)
+                        final = self._recv(s, chat.pipe[0])
                         if final is None:
                             break
                         body = final.decode(
@@ -423,7 +437,7 @@ class Requester:
                             final = "\n\n".join(body[1:]).encode()
                         else:
                             final = body[1].encode()
-                        final = self._get_all(final, size - 2, s)
+                        final = self._get_all(final, size - 2, s, chat.pipe[0])
                         body = final.decode(
                             "utf-8", errors="replace"
                         ).splitlines()
@@ -449,7 +463,7 @@ class Requester:
                     call = True
 
             if "content-type: application/json" in raw[0].lower():
-                body = self._handle_json(s, raw)
+                body = self._handle_json(s, raw, chat.pipe[0])
                 _, call = self._handle_msg(chat, body)
             s.close()
             if call:
@@ -473,5 +487,7 @@ class Requester:
                 return None
             return f"{error.__class__.__name__}: {error}"
         finally:
+            if s is not None:
+                s.close()
             with chat.cond:
                 chat.in_request = False
