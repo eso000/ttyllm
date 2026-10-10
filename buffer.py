@@ -16,7 +16,6 @@ class ColorCodeException(Exception):
 class Buffer:  # pylint: disable=R0902, R0904
     """one chat: message history, sampling options, looks and pending tool calls"""
     TOOLS: bool = False
-    OLLAMA: bool = True
 
     def __init__(self) -> None:
         """create an empty buffer with default looks, options and a system message"""
@@ -579,18 +578,6 @@ class Buffer:  # pylint: disable=R0902, R0904
                 res += text_to_lines(
                     "[y] approve  [n] decline  [ctrl-c] decline all", width, warn
                 )
-        return res
-
-    def get_string(self) -> str:
-        """render the user and assistant messages as one colored string"""
-        res = ""
-        for msg_ in self.chat_data["messages"]:
-            if msg_["role"] == "user":
-                res += f"{self.normal_color}{self.user_name}\n"
-                res += f"{self.user_color}{msg_["content"]}\n"
-            if msg_["role"] == "assistant":
-                res += f"{self.normal_color}{self.ai_name}\n"
-                res += f"{self.ai_color}{msg_["content"]}\n"
         return res
 
     def estimate_tokens(self) -> int:

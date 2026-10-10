@@ -104,10 +104,8 @@ class Commands:
 
     def set_view(self, view: ViewMode, scroll: int | None) -> None:
         """show another view, scroll is where it starts and None keeps the position"""
-        with self._buffer.cond:
-            self.sv.ui.set_mode(view, scroll)
-            self._buffer.updated = True
-            self._buffer.cond.notify()
+        self.sv.ui.set_mode(view, scroll)
+        self._buffer.notify()
 
     def change_role(self, role: str) -> None:
         """change the role of the current message"""

@@ -3,6 +3,7 @@ import json
 import os
 import sys
 import tempfile
+import threading
 import unittest
 from unittest import mock
 
@@ -121,6 +122,22 @@ class TestViews(CommandsTestCase):
         self.sv.current_buffer.updated = False
         self.commands.execute(":h")
         self.assertTrue(self.sv.current_buffer.updated)
+
+    def test_view_takes_the_ui_lock_before_the_buffer_lock(self) -> None:
+        """a set_view that held the buffer lock while taking the ui lock would
+        invert the input thread's ui -> buffer order and deadlock"""
+        ui, buffer = self.sv.ui, self.sv.current_buffer
+        ui.cond.acquire()
+        thread = threading.Thread(target=self.commands.execute, args=(":h",))
+        thread.start()
+        # while the ui lock is held, the buffer lock must still be free
+        free = buffer.cond.acquire(timeout=1)
+        if free:
+            buffer.cond.release()
+        ui.cond.release()
+        thread.join(2)
+        self.assertTrue(free, "set_view took the buffer lock before the ui lock")
+        self.assertFalse(thread.is_alive())
 
 
 class TestRoles(CommandsTestCase):
