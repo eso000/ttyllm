@@ -210,10 +210,10 @@ class TestModelListFromResponse(unittest.TestCase):
         self.assertEqual(list(ModelList.from_response(None)), [])
         self.assertEqual(list(ModelList.from_response("models")), [])
 
-    def test_empty_model_list_is_len_zero_and_empty_short(self) -> None:
+    def test_empty_model_list_reports_no_models(self) -> None:
         models = ModelList([])
         self.assertEqual(len(models), 0)
-        self.assertEqual(models.short, "")
+        self.assertEqual(models.short, "no models available\n")
         self.assertEqual(models.names, [])
 
 class TestModelListShort(unittest.TestCase):
@@ -368,7 +368,7 @@ class TestSupervisorModelAttributes(unittest.TestCase):
         supervisor.load_models()
         self.assertEqual(list(supervisor.models), [])
         self.assertEqual(supervisor.models.names, [])
-        self.assertEqual(supervisor.models.short, "")
+        self.assertEqual(supervisor.models.short, "no models available\n")
 
     def test_load_models_from_openai_names_only(self) -> None:
         supervisor = Supervisor.__new__(Supervisor)

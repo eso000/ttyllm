@@ -59,6 +59,13 @@ class TestCompose(ViewTestCase):
         self.assertIn("MODEL LIST", _text(box))
         self.assertTrue(hide)
 
+    def test_models_mode_says_so_when_there_are_none(self) -> None:
+        self.sv.models = ModelList([])
+        self.ui.mode = ViewMode.MODELS
+        box, hide = self.view.compose(self.buffer, -1)
+        self.assertIn("no models available", _text(box))
+        self.assertTrue(hide)
+
     def test_help_and_models_are_only_read_for_their_own_view(self) -> None:
         with mock.patch.object(self.sv.commands, "help_text") as help_text:
             self.view.compose(self.buffer, -1)

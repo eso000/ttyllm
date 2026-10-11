@@ -60,6 +60,8 @@ class ModelList:
     @property
     def short(self) -> str:
         """the model list as a printable block, one line per model"""
+        if not self._models:
+            return "no models available\n"
         return "".join(self._line(model) for model in self._models)
 
     @staticmethod
