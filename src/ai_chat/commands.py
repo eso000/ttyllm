@@ -216,6 +216,14 @@ class Commands:
         except FileNotFoundError:
             self.sv.show_notification(f"File {args[0]} not found")
 
+    def _number(self, value: str, convert: Callable[[str], Any]) -> Any:
+        """parse a numeric value, show a notification and give None when invalid"""
+        try:
+            return convert(value)
+        except ValueError:
+            self.sv.show_notification(f"invalid value: {value}")
+            return None
+
     def options(self, *args: str) -> None:
         """show or set sampling options
 
@@ -233,15 +241,20 @@ class Commands:
         else:
             match args[0]:
                 case "k":
-                    self._buffer.top_k = float(args[1])
+                    if (top_k := self._number(args[1], int)) is not None:
+                        self._buffer.top_k = top_k
                 case "p":
-                    self._buffer.top_p = float(args[1])
+                    if (top_p := self._number(args[1], float)) is not None:
+                        self._buffer.top_p = top_p
                 case "t":
-                    self._buffer.temperature = float(args[1])
+                    if (temperature := self._number(args[1], float)) is not None:
+                        self._buffer.temperature = temperature
                 case "pen":
-                    self._buffer.repeat_penalty = float(args[1])
+                    if (penalty := self._number(args[1], float)) is not None:
+                        self._buffer.repeat_penalty = penalty
                 case "stream":
-                    self._data["stream"] = int(args[1]) & 1 == 1
+                    if (stream := self._number(args[1], int)) is not None:
+                        self._data["stream"] = stream & 1 == 1
                 case _:
                     self.sv.show_notification(f"command {args[0]} not found")
 

@@ -287,6 +287,14 @@ class TestOptions(CommandsTestCase):
         self.commands.execute(":o t 0.8")
         self.assertEqual(self.sv.current_buffer.temperature, 0.8)
 
+    def test_invalid_value_is_reported_and_nothing_changes(self) -> None:
+        for command in (":o k abc", ":o p abc", ":o t abc", ":o pen abc", ":o stream abc"):
+            with self.subTest(command=command):
+                before = dict(self.sv.current_buffer.options)
+                self.commands.execute(command)
+                self.assertIn("invalid value", self.sv.ui.notification)
+                self.assertEqual(self.sv.current_buffer.options, before)
+
     def test_unknown_option_is_reported(self) -> None:
         self.commands.execute(":o bogus 1")
         self.assertIn("bogus", self.sv.ui.notification)
