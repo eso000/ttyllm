@@ -1,6 +1,6 @@
 import subprocess
 
-from tool import Tool, Parameter
+from .tool import Tool, Parameter
 
 toolchain: list[Tool] = []
 

@@ -1,22 +1,16 @@
 import dataclasses
-import os
-import sys
 import unittest
 from typing import Any
 from unittest import mock
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-import view as view_module
-from buffer import Buffer
-from models import Model, ModelList
-from state import ViewMode
-from supervisor import Supervisor
-
+from ai_chat import view as view_module
+from ai_chat.buffer import Buffer
+from ai_chat.models import Model, ModelList
+from ai_chat.state import ViewMode
+from ai_chat.supervisor import Supervisor
 
 def _text(box: Any) -> str:
     return "\n".join(box.lines)
-
 
 class ViewTestCase(unittest.TestCase):
     def setUp(self) -> None:
@@ -25,7 +19,6 @@ class ViewTestCase(unittest.TestCase):
         self.ui = self.sv.ui
         self.ui.columns, self.ui.lines = 80, 24
         self.buffer = self.sv.current_buffer
-
 
 class TestCompose(ViewTestCase):
     def setUp(self) -> None:
@@ -107,7 +100,6 @@ class TestCompose(ViewTestCase):
         self.assertIs(self.view.ui, other)
         self.assertEqual(self.view.box_width, 46)
 
-
 class TestDraw(ViewTestCase):
     def test_draw_uses_the_terminal_size(self) -> None:
         box, _ = self.view.compose(self.buffer, -1)
@@ -115,7 +107,6 @@ class TestDraw(ViewTestCase):
             result = self.view.draw(box, True)
         self.assertEqual(result, (5, -1))
         fit.assert_called_once_with(box, 76, 19, 2, 3, hide_cursor=True)
-
 
 class TestStatusLine(ViewTestCase):
     def _buffers(self, count: int) -> list[Buffer]:
@@ -177,7 +168,6 @@ class TestStatusLine(ViewTestCase):
             self.view.draw_command_line()
         self.assertIn("model:", fit.call_args.args[0])
         self.assertTrue(fit.call_args.kwargs["hide_cursor"])
-
 
 if __name__ == "__main__":
     unittest.main()

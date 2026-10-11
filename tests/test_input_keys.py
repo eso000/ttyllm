@@ -6,18 +6,15 @@ import unittest
 from typing import Any
 from unittest import mock
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-import view as view_module
-from models import Model, ModelList
-from state import ViewMode
-from supervisor import Supervisor
+from ai_chat import view as view_module
+from ai_chat.models import Model, ModelList
+from ai_chat.state import ViewMode
+from ai_chat.supervisor import Supervisor
 
 CTRL_B, CTRL_C, CTRL_D, CTRL_E = b"\x02", b"\x03", b"\x04", b"\x05"
 CTRL_N, CTRL_P, CTRL_Q, CTRL_R = b"\x0e", b"\x10", b"\x11", b"\x12"
 CTRL_S, CTRL_U, TAB, BACKSPACE = b"\x13", b"\x15", b"\t", b"\x7f"
 UP, DOWN, RIGHT, LEFT = b"\x1b[A", b"\x1b[B", b"\x1b[C", b"\x1b[D"
-
 
 def press(data: bytes, sv: Supervisor | None = None, **state: Any) -> Supervisor:
     """feed raw bytes through the input thread until stdin closes"""
@@ -40,14 +37,11 @@ def press(data: bytes, sv: Supervisor | None = None, **state: Any) -> Supervisor
     assert not thread.is_alive(), "input thread did not finish"
     return sv
 
-
 def content(sv: Supervisor) -> str:
     return str(sv.current_data["messages"][-1]["content"])
 
-
 def pending_call() -> dict[str, Any]:
     return {"id": "1", "name": "tool", "args": {}, "approved": None, "result": None}
-
 
 class TestBufferKeys(unittest.TestCase):
     def test_ctrl_b_creates_a_buffer(self) -> None:
@@ -95,7 +89,6 @@ class TestBufferKeys(unittest.TestCase):
         self.assertEqual(sv.ui.command, "")
         self.assertEqual(len(sv.buffers), 1)
 
-
 class TestCommandLine(unittest.TestCase):
     def test_ctrl_q_toggles_command_mode(self) -> None:
         self.assertEqual(press(CTRL_Q).ui.command, "/")
@@ -136,7 +129,6 @@ class TestCommandLine(unittest.TestCase):
         self.assertIs(sv.ui.mode, ViewMode.NORMAL)
         self.assertEqual(sv.ui.scroll, -1)
 
-
 class TestTyping(unittest.TestCase):
     def test_text_goes_into_the_message(self) -> None:
         sv = press(b"hi there")
@@ -154,7 +146,6 @@ class TestTyping(unittest.TestCase):
         sv = press(b"a", mode=ViewMode.DATA, scroll=3)
         self.assertIs(sv.ui.mode, ViewMode.NORMAL)
         self.assertEqual(sv.ui.scroll, -1)
-
 
 class TestEnter(unittest.TestCase):
     def test_enter_submits_a_message(self) -> None:
@@ -182,7 +173,6 @@ class TestEnter(unittest.TestCase):
         self.assertIs(sv.ui.mode, ViewMode.NORMAL)
         self.assertEqual(sv.ui.scroll, -1)
         self.assertFalse(sv.ui.submitted)
-
 
 class TestToolApproval(unittest.TestCase):
     def _press(self, data: bytes, **state: Any) -> tuple[Supervisor, dict[str, Any]]:
@@ -212,7 +202,6 @@ class TestToolApproval(unittest.TestCase):
     def test_y_without_a_pending_call_is_text(self) -> None:
         self.assertEqual(content(press(b"yes")), "yes")
 
-
 class TestNotification(unittest.TestCase):
     def test_the_first_key_only_dismisses_it(self) -> None:
         sv = press(b"ab", notification="cannot reach server")
@@ -222,7 +211,6 @@ class TestNotification(unittest.TestCase):
     def test_a_dismissing_key_is_not_executed(self) -> None:
         sv = press(CTRL_B, notification="boom")
         self.assertEqual(len(sv.buffers), 1)
-
 
 class TestEscapeSequences(unittest.TestCase):
     def test_arrows_scroll(self) -> None:
@@ -251,7 +239,6 @@ class TestEscapeSequences(unittest.TestCase):
 
     def test_escape_followed_by_escape_is_dropped(self) -> None:
         self.assertEqual(content(press(b"\x1b\x1bx")), "x")
-
 
 class TestTabCompletion(unittest.TestCase):
     MODELS = ["llama3.2", "llama3.1", "mistral"]
@@ -302,7 +289,6 @@ class TestTabCompletion(unittest.TestCase):
                 self._complete(f":i {folder}/be"), f":i {folder}/beta.json"
             )
             self.assertEqual(self._complete(f":i {folder}/su"), f":i {folder}/sub/")
-
 
 if __name__ == "__main__":
     unittest.main()

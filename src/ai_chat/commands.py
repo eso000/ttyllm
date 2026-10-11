@@ -5,8 +5,8 @@ from collections.abc import Callable
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
-from buffer import Buffer, ColorCodeException
-from state import ViewMode
+from .buffer import Buffer, ColorCodeException
+from .state import ViewMode
 
 if TYPE_CHECKING:
     from supervisor import Supervisor

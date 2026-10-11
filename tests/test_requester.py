@@ -6,25 +6,21 @@ import shutil
 import socket
 import ssl
 import subprocess
-import sys
 import tempfile
 import threading
 import unittest
 from typing import Any
 from unittest import mock
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-import requester
-from models import Model, ModelList
-from requester import Requester
-from commands import Commands
-from state import UIState
-from supervisor import Supervisor
-from buffer import Buffer
+from ai_chat import requester
+from ai_chat.models import Model, ModelList
+from ai_chat.requester import Requester
+from ai_chat.commands import Commands
+from ai_chat.state import UIState
+from ai_chat.supervisor import Supervisor
+from ai_chat.buffer import Buffer
 
 GIB = 1073741824
-
 
 def _http_response(payload: Any, content_type: str = "application/json") -> bytes:
     body = json.dumps(payload).encode()
@@ -35,7 +31,6 @@ def _http_response(payload: Any, content_type: str = "application/json") -> byte
         "\r\n"
     ).encode()
     return head + body
-
 
 def _sse_response(*events: str) -> bytes:
     """build a chunked text/event-stream http response from raw sse events"""
@@ -50,7 +45,6 @@ def _sse_response(*events: str) -> bytes:
         "\r\n"
     ).encode()
     return head + chunks + b"0\r\n\r\n"
-
 
 def _serve_once(response: bytes) -> tuple[int, threading.Thread]:
     """start a one-shot http server, return its port"""
@@ -74,14 +68,12 @@ def _serve_once(response: bytes) -> tuple[int, threading.Thread]:
     thread.start()
     return port, thread
 
-
 def _closed_port() -> int:
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.bind(("127.0.0.1", 0))
     port = sock.getsockname()[1]
     sock.close()
     return port
-
 
 def _serve_stall(
     connected: threading.Event | None = None,
@@ -110,7 +102,6 @@ def _serve_stall(
     thread.start()
     return port, thread
 
-
 def _self_signed_cert(directory: str) -> tuple[str, str]:
     """generate a throwaway self-signed cert for localhost with the openssl cli"""
     certfile = os.path.join(directory, "cert.pem")
@@ -136,7 +127,6 @@ def _self_signed_cert(directory: str) -> tuple[str, str]:
         capture_output=True,
     )
     return certfile, keyfile
-
 
 def _serve_tls_once(
     response: bytes, certfile: str, keyfile: str
@@ -164,14 +154,12 @@ def _serve_tls_once(
     thread.start()
     return port, thread
 
-
 def _unverified_context() -> ssl.SSLContext:
     """a client context that skips verification, for the self-signed test server"""
     context = ssl.create_default_context()
     context.check_hostname = False
     context.verify_mode = ssl.CERT_NONE
     return context
-
 
 class TestModelListFromResponse(unittest.TestCase):
     def test_openai_provides_names_only(self) -> None:
@@ -228,7 +216,6 @@ class TestModelListFromResponse(unittest.TestCase):
         self.assertEqual(models.short, "")
         self.assertEqual(models.names, [])
 
-
 class TestModelListShort(unittest.TestCase):
     def test_openai_names_only(self) -> None:
         self.assertEqual(ModelList([Model("gpt-4o")]).short, "gpt-4o\n")
@@ -236,7 +223,6 @@ class TestModelListShort(unittest.TestCase):
     def test_ollama_with_size(self) -> None:
         line = ModelList([Model("llama3.2", 2, "3B")]).short
         self.assertEqual(line, f"{'llama3.2':<20}\t 2 GB\t3B\n")
-
 
 class TestGetModels(unittest.TestCase):
     def test_ollama_response(self) -> None:
@@ -283,7 +269,6 @@ class TestGetModels(unittest.TestCase):
         request.get_models()
         self.assertIsNone(request.models_error)
 
-
 class TestEndpoint(unittest.TestCase):
     def test_https_url_enables_tls_on_the_default_port(self) -> None:
         request = Requester()
@@ -319,19 +304,18 @@ class TestEndpoint(unittest.TestCase):
         self.assertEqual(request.port, 11434)
         self.assertTrue(request.tls)
 
-
 class TestConnect(unittest.TestCase):
     def test_plain_connection_is_returned_as_is(self) -> None:
         request = Requester(host="127.0.0.1", port=11434)
-        with mock.patch("requester.socket.socket") as socket_mock:
+        with mock.patch("ai_chat.requester.socket.socket") as socket_mock:
             raw = socket_mock.return_value
             self.assertIs(request._connect(), raw)
         raw.connect.assert_called_once_with(("127.0.0.1", 11434))
 
     def test_tls_connection_is_wrapped_with_the_server_name(self) -> None:
         request = Requester(host="api.example.com", port=443, tls=True)
-        with mock.patch("requester.socket.socket") as socket_mock, mock.patch(
-            "requester.ssl.create_default_context"
+        with mock.patch("ai_chat.requester.socket.socket") as socket_mock, mock.patch(
+            "ai_chat.requester.ssl.create_default_context"
         ) as context_mock:
             raw = socket_mock.return_value
             wrapped = context_mock.return_value.wrap_socket.return_value
@@ -342,8 +326,8 @@ class TestConnect(unittest.TestCase):
 
     def test_tls_context_is_built_once(self) -> None:
         request = Requester(host="api.example.com", tls=True)
-        with mock.patch("requester.socket.socket"), mock.patch(
-            "requester.ssl.create_default_context"
+        with mock.patch("ai_chat.requester.socket.socket"), mock.patch(
+            "ai_chat.requester.ssl.create_default_context"
         ) as context_mock:
             request._connect()
             request._connect()
@@ -351,15 +335,14 @@ class TestConnect(unittest.TestCase):
 
     def test_raw_socket_is_closed_when_wrapping_fails(self) -> None:
         request = Requester(host="api.example.com", tls=True)
-        with mock.patch("requester.socket.socket") as socket_mock, mock.patch(
-            "requester.ssl.create_default_context"
+        with mock.patch("ai_chat.requester.socket.socket") as socket_mock, mock.patch(
+            "ai_chat.requester.ssl.create_default_context"
         ) as context_mock:
             raw = socket_mock.return_value
             context_mock.return_value.wrap_socket.side_effect = OSError("tls failed")
             with self.assertRaises(OSError):
                 request._connect()
         raw.close.assert_called_once()
-
 
 @unittest.skipUnless(shutil.which("openssl"), "the openssl cli is required")
 class TestTlsConnection(unittest.TestCase):
@@ -376,7 +359,6 @@ class TestTlsConnection(unittest.TestCase):
                 result = request.get_models()
         self.assertEqual(list(result), [Model("gpt-4o")])
         self.assertIsNone(request.models_error)
-
 
 class TestSupervisorModelAttributes(unittest.TestCase):
     def test_load_models_on_unreachable_server_is_safe(self) -> None:
@@ -397,7 +379,6 @@ class TestSupervisorModelAttributes(unittest.TestCase):
         supervisor.load_models()
         self.assertEqual(supervisor.models.names, ["gpt-4o", "o1"])
         self.assertEqual(supervisor.models.short, "gpt-4o\no1\n")
-
 
 class TestReplyErrors(unittest.TestCase):
     def test_connection_error_is_returned(self) -> None:
@@ -450,7 +431,7 @@ class TestReplyErrors(unittest.TestCase):
     def test_socket_is_closed_when_connect_fails(self) -> None:
         chat = Buffer()
         request = Requester(port=_closed_port())
-        with mock.patch("requester.socket.socket") as socket_mock:
+        with mock.patch("ai_chat.requester.socket.socket") as socket_mock:
             socket_mock.return_value.connect.side_effect = OSError("refused")
             error = request.get_reply(chat)
         self.assertIn("OSError", error)  # type: ignore[arg-type]
@@ -463,7 +444,6 @@ class TestReplyErrors(unittest.TestCase):
         request.read_timeout = 0.2
         error = request.get_reply(Buffer())
         self.assertIn("TimeoutError", error)  # type: ignore[arg-type]
-
 
 class TestGetHeader(unittest.TestCase):
     def test_body_after_header_terminator_is_kept(self) -> None:
@@ -482,7 +462,6 @@ class TestGetHeader(unittest.TestCase):
         head, body = Requester()._get_header(client)  # type: ignore[misc]
         self.assertIn("HTTP/1.1 200 OK", head)
         self.assertEqual(body, b"data: one\r\n\r\ndata: two\r\n\r\n")
-
 
 class TestStreamingUsage(unittest.TestCase):
     def test_usage_only_chunk_is_not_a_choice(self) -> None:
@@ -533,7 +512,6 @@ class TestStreamingUsage(unittest.TestCase):
         chat = Buffer()
         chat.chat_data["stream"] = False
         self.assertNotIn("stream_options", chat.openai_data)
-
 
 class TestOpenAiToolMessages(unittest.TestCase):
     def _chat(self) -> Buffer:
@@ -601,7 +579,6 @@ class TestOpenAiToolMessages(unittest.TestCase):
         }
         call = chat.openai_data["messages"][2]["tool_calls"][0]
         self.assertEqual(call["function"]["arguments"], '{"text": "a"}')
-
 
 class TestOpenAiToolStreaming(unittest.TestCase):
     def test_fragmented_arguments_are_accumulated(self) -> None:
@@ -712,7 +689,6 @@ class TestOpenAiToolStreaming(unittest.TestCase):
         )
         self.assertEqual(messages[1]["tool_call_id"], "call_1")
 
-
 class TestNotification(unittest.TestCase):
     def setUp(self) -> None:
         self.supervisor = Supervisor.__new__(Supervisor)
@@ -748,7 +724,6 @@ class TestNotification(unittest.TestCase):
         self.assertTrue(self.supervisor.buffers[0].updated)
         self.assertEqual(self.supervisor.ui.scroll, 0)
 
-
 class TestHelp(unittest.TestCase):
     def setUp(self) -> None:
         self.supervisor = Supervisor.__new__(Supervisor)
@@ -776,7 +751,6 @@ class TestHelp(unittest.TestCase):
     def test_supervisor_owns_the_command_table(self) -> None:
         supervisor = Supervisor()
         self.assertIn("sm", supervisor.commands.table)
-
 
 if __name__ == "__main__":
     unittest.main()

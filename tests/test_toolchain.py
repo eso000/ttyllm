@@ -1,12 +1,8 @@
 import os
-import sys
 import tempfile
 import unittest
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from toolchain import read_file
-
+from ai_chat.toolchain import read_file
 
 class TestReadFile(unittest.TestCase):
     def test_reads_utf8_content(self) -> None:
@@ -33,7 +29,6 @@ class TestReadFile(unittest.TestCase):
     def test_missing_file_raises(self) -> None:
         with self.assertRaises(FileNotFoundError):
             read_file("/nonexistent/path/definitely-not-here")
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -7,10 +7,7 @@ import termios
 import unittest
 from unittest import mock
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from terminal import raw_terminal
-
+from ai_chat.terminal import raw_terminal
 
 class TestRawTerminal(unittest.TestCase):
     def setUp(self) -> None:
@@ -64,7 +61,6 @@ class TestRawTerminal(unittest.TestCase):
                 with raw_terminal():
                     pass
         self.assertEqual(out.getvalue(), "")
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,13 +1,9 @@
 import os
-import sys
 import threading
 import unittest
 from unittest import mock
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from state import UIState, ViewMode
-
+from ai_chat.state import UIState, ViewMode
 
 class TestDefaults(unittest.TestCase):
     def test_starts_in_the_chat_following_its_end(self) -> None:
@@ -22,21 +18,19 @@ class TestDefaults(unittest.TestCase):
         first.command = "/x"
         self.assertEqual(second.command, "")
 
-
 class TestTerminalSize(unittest.TestCase):
     def test_from_terminal_reads_the_size(self) -> None:
-        with mock.patch("state.shutil.get_terminal_size") as size:
+        with mock.patch("ai_chat.state.shutil.get_terminal_size") as size:
             size.return_value = os.terminal_size((120, 40))
             ui = UIState.from_terminal()
         self.assertEqual((ui.columns, ui.lines), (120, 40))
 
     def test_resize_picks_up_a_new_size(self) -> None:
         ui = UIState()
-        with mock.patch("state.shutil.get_terminal_size") as size:
+        with mock.patch("ai_chat.state.shutil.get_terminal_size") as size:
             size.return_value = os.terminal_size((60, 20))
             ui.resize()
         self.assertEqual((ui.columns, ui.lines), (60, 20))
-
 
 class TestModes(unittest.TestCase):
     def test_set_mode_with_a_scroll_position(self) -> None:
@@ -61,7 +55,6 @@ class TestModes(unittest.TestCase):
         ui.show_chat()
         self.assertIs(ui.mode, ViewMode.NORMAL)
         self.assertEqual(ui.scroll, -1)
-
 
 class TestScrolling(unittest.TestCase):
     def test_up_from_the_end_goes_to_the_last_full_page(self) -> None:
@@ -106,7 +99,6 @@ class TestScrolling(unittest.TestCase):
         ui.scroll_to_end()
         self.assertEqual(ui.scroll, -1)
 
-
 class TestNotification(unittest.TestCase):
     def test_set_scrolls_to_the_start(self) -> None:
         ui = UIState(scroll=12)
@@ -121,7 +113,6 @@ class TestNotification(unittest.TestCase):
         self.assertTrue(ui.dismiss_notification())
         self.assertEqual(ui.notification, "")
         self.assertFalse(ui.dismiss_notification())
-
 
 class TestTakeCommand(unittest.TestCase):
     def test_returns_and_clears_the_command(self) -> None:
@@ -154,7 +145,6 @@ class TestTakeCommand(unittest.TestCase):
         self.assertTrue(woke.wait(2))
         thread.join(2)
         self.assertFalse(thread.is_alive())
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -37,10 +37,21 @@ HTTP library standing between you and the wire protocol.
 
 ## Usage
 
+Run straight from a checkout (no install needed) with `python3 .`:
+
 ```sh
 python3 .            # chat against the default Ollama endpoint
 python3 . -o         # use an OpenAI-compatible API (/v1/chat/completions)
 python3 . -t         # enable tool calling (asks for approval before running)
+python3 . --version  # print the version
+python3 . --help     # show all options
+```
+
+Optionally install it to get the `ai-chat` command (and `python -m ai_chat`):
+
+```sh
+pip install -e .
+ai-chat
 ```
 
 Type a message and press <kbd>Enter</kbd> to send. Start a line with `:` or
@@ -95,25 +106,28 @@ Run with `:h` (or see the table below) inside the app:
 Run the test suite:
 
 ```sh
-python3 -m unittest discover -s tests
+PYTHONPATH=src python3 -m unittest discover -s tests
 ```
 
 ### Project layout
 
-| File            | Purpose                                              |
-| --------------- | ---------------------------------------------------- |
-| `__main__.py`   | entry point and CLI flags                            |
-| `supervisor.py` | buffers and their operations, request scheduling, threads |
-| `input_handler.py` | keystrokes to commands, line edits, scrolling, approvals |
-| `completion.py` | tab completion of model names and file paths         |
-| `commands.py`   | the `:` / `/` command table and the help screen      |
-| `request_queue.py` | serialises reply requests, one buffer at a time   |
-| `terminal.py`   | raw input mode and alternate screen handling         |
-| `state.py`      | `UIState`: locked view mode, scroll, command line, notification |
-| `view.py`       | renders the buffer for the current `UIState`         |
-| `buffer.py`     | per-chat state, messages, and rendering              |
-| `requester.py`  | raw-socket HTTP client and streaming parsers         |
-| `models.py`     | `Model` entries and `ModelList`, the parsed and formatted model list |
-| `box_drawing.py`| text box layout and wrapping                         |
-| `tool.py` / `toolchain.py` | tool definitions and available tools        |
-| `tests/`        | unit tests (unittest, no extra dependencies)         |
+| File                     | Purpose                                              |
+| ------------------------ | ---------------------------------------------------- |
+| `__main__.py`            | runs `ai-chat` from a checkout (`python3 .`)          |
+| `pyproject.toml`         | package metadata, build config, `ai-chat` entry point |
+| `src/ai_chat/cli.py`     | command-line arguments and the `main()` entry point   |
+| `src/ai_chat/__main__.py`| runs `main()` for `python -m ai_chat`                 |
+| `src/ai_chat/supervisor.py` | buffers and their operations, request scheduling, threads |
+| `src/ai_chat/input_handler.py` | keystrokes to commands, line edits, scrolling, approvals |
+| `src/ai_chat/completion.py` | tab completion of model names and file paths      |
+| `src/ai_chat/commands.py` | the `:` / `/` command table and the help screen     |
+| `src/ai_chat/request_queue.py` | serialises reply requests, one buffer at a time |
+| `src/ai_chat/terminal.py` | raw input mode and alternate screen handling        |
+| `src/ai_chat/state.py`   | `UIState`: locked view mode, scroll, command line, notification |
+| `src/ai_chat/view.py`    | renders the buffer for the current `UIState`         |
+| `src/ai_chat/buffer.py`  | per-chat state, messages, and rendering              |
+| `src/ai_chat/requester.py` | raw-socket HTTP client and streaming parsers       |
+| `src/ai_chat/models.py`  | `Model` entries and `ModelList`, the parsed and formatted model list |
+| `src/ai_chat/box_drawing.py` | text box layout and wrapping                     |
+| `src/ai_chat/tool.py` / `src/ai_chat/toolchain.py` | tool definitions and available tools |
+| `tests/`                 | unit tests (unittest, no extra dependencies)         |

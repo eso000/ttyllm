@@ -1,6 +1,6 @@
 import threading
 
-from buffer import Buffer
+from .buffer import Buffer
 
 
 class RequestQueue:

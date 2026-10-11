@@ -4,8 +4,8 @@ import json
 import threading
 from typing import Any
 
-from box_drawing import TextBox, text_to_lines, make_text_box
-import toolchain
+from .box_drawing import TextBox, text_to_lines, make_text_box
+from . import toolchain
 
 
 class ColorCodeException(Exception):

@@ -6,8 +6,8 @@ import sys
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from completion import complete
-from state import ViewMode
+from .completion import complete
+from .state import ViewMode
 
 if TYPE_CHECKING:
     from supervisor import Supervisor

@@ -1,23 +1,17 @@
-import os
-import sys
 import unittest
 from typing import Any
 from unittest import mock
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-import toolchain
-from buffer import Buffer
-from requester import Requester
-from tool import Parameter, Tool
+from ai_chat import toolchain
+from ai_chat.buffer import Buffer
+from ai_chat.requester import Requester
+from ai_chat.tool import Parameter, Tool
 from test_requester import _http_response, _serve_once
-
 
 def _call(
     name: str = "echo", args: Any = None, call_id: str = "call_1"
 ) -> dict[str, Any]:
     return {"id": call_id, "function": {"name": name, "arguments": args or {}}}
-
 
 class ToolTestCase(unittest.TestCase):
     def setUp(self) -> None:
@@ -35,7 +29,6 @@ class ToolTestCase(unittest.TestCase):
         self.chat.in_request = True
         self.chat.add_msg("assistant")
         self.requester = Requester()
-
 
 class TestCollectingToolCalls(ToolTestCase):
     def test_tool_is_not_run_before_approval(self) -> None:
@@ -62,7 +55,6 @@ class TestCollectingToolCalls(ToolTestCase):
         call = {"function": {"name": "echo", "arguments": {}}}
         self.requester._handle_tool_call(self.chat, [call])
         self.assertIsNone(self.chat.pending_calls[0]["id"])
-
 
 class TestDeciding(ToolTestCase):
     def setUp(self) -> None:
@@ -128,7 +120,6 @@ class TestDeciding(ToolTestCase):
         self.assertFalse(self.chat.abort_pending())
         self.assertEqual(len(self.chat.pending_calls), 2)
 
-
 class TestBufferWhilePending(ToolTestCase):
     def setUp(self) -> None:
         super().setUp()
@@ -155,7 +146,6 @@ class TestBufferWhilePending(ToolTestCase):
     def test_clearing_the_chat_drops_pending_calls(self) -> None:
         self.chat.empty()
         self.assertEqual(self.chat.pending_calls, [])
-
 
 class TestRequestEndsAtToolCall(ToolTestCase):
     def test_request_terminates_and_waits_for_approval(self) -> None:
@@ -185,7 +175,6 @@ class TestRequestEndsAtToolCall(ToolTestCase):
         error = requester.get_reply(chat, wrapped=True)
         self.assertIn("exceeded", error)  # type: ignore[arg-type]
         self.assertEqual(chat.chat_data["messages"][-1]["role"], "user")
-
 
 if __name__ == "__main__":
     unittest.main()

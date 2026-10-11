@@ -3,7 +3,7 @@ import sys
 import termios
 from collections.abc import Iterator
 
-from box_drawing import clean_screen
+from .box_drawing import clean_screen
 
 
 @contextlib.contextmanager

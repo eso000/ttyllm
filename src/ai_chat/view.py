@@ -1,8 +1,8 @@
 from typing import TYPE_CHECKING
 
-from box_drawing import TextBox, fit_text_to_box, fit_to_box, make_text_box
-from buffer import Buffer
-from state import UIState, ViewMode
+from .box_drawing import TextBox, fit_text_to_box, fit_to_box, make_text_box
+from .buffer import Buffer
+from .state import UIState, ViewMode
 
 if TYPE_CHECKING:
     from supervisor import Supervisor

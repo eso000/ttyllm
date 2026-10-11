@@ -1,14 +1,10 @@
 import os
-import sys
 import tempfile
 import unittest
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from completion import candidates, complete
+from ai_chat.completion import candidates, complete
 
 MODELS = ["llama3.2", "llama3.1", "mistral"]
-
 
 class TestCandidates(unittest.TestCase):
     def test_a_command_without_an_argument_has_none(self) -> None:
@@ -34,7 +30,6 @@ class TestCandidates(unittest.TestCase):
     def test_only_the_second_word_is_completed(self) -> None:
         self.assertEqual(candidates(":sm ll extra", MODELS)[0], "ll")
 
-
 class TestComplete(unittest.TestCase):
     def test_single_match_completes_fully(self) -> None:
         self.assertEqual(complete(":sm mi", MODELS), "stral")
@@ -53,7 +48,6 @@ class TestComplete(unittest.TestCase):
 
     def test_no_models(self) -> None:
         self.assertEqual(complete(":sm l", []), "")
-
 
 class TestPaths(unittest.TestCase):
     def setUp(self) -> None:
@@ -80,7 +74,6 @@ class TestPaths(unittest.TestCase):
 
     def test_nothing_matches(self) -> None:
         self.assertEqual(complete(f":i {self.folder}/zzz", []), "")
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -6,16 +6,16 @@ import types
 from collections.abc import Callable
 from typing import Any
 
-from box_drawing import clean_screen
-from buffer import Buffer
-from commands import Commands
-from input_handler import InputHandler
-from models import ModelList
-from request_queue import RequestQueue
-from requester import Requester
-from state import UIState
-from terminal import raw_terminal
-from view import View
+from .box_drawing import clean_screen
+from .buffer import Buffer
+from .commands import Commands
+from .input_handler import InputHandler
+from .models import ModelList
+from .request_queue import RequestQueue
+from .requester import Requester
+from .state import UIState
+from .terminal import raw_terminal
+from .view import View
 
 
 class Supervisor:

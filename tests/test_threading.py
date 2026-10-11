@@ -6,17 +6,14 @@ import unittest
 from typing import Any
 from unittest import mock
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-import supervisor as supervisor_module
-import view as view_module
-from buffer import Buffer
-from requester import Requester
-from request_queue import RequestQueue
-from state import ViewMode
-from supervisor import Supervisor
+from ai_chat import supervisor as supervisor_module
+from ai_chat import view as view_module
+from ai_chat.buffer import Buffer
+from ai_chat.requester import Requester
+from ai_chat.request_queue import RequestQueue
+from ai_chat.state import ViewMode
+from ai_chat.supervisor import Supervisor
 from test_requester import _http_response, _serve_once
-
 
 class TestRenderThread(unittest.TestCase):
     def test_survives_rapid_buffer_switching(self) -> None:
@@ -72,7 +69,6 @@ class TestRenderThread(unittest.TestCase):
             render.join(2)
         self.assertEqual(sv.ui.scroll_max, 10)
         self.assertEqual(sv.ui.scroll, 7)
-
 
 class TestCancel(unittest.TestCase):
     def test_idle_cancel_leaves_nothing_behind(self) -> None:
@@ -131,7 +127,6 @@ class TestCancel(unittest.TestCase):
                 os.fstat(fd)
         chat.pipe = ()  # type: ignore[assignment]
 
-
 class TestRequestQueue(unittest.TestCase):
     def test_concurrent_schedule_enqueues_once(self) -> None:
         old_interval = sys.getswitchinterval()
@@ -152,7 +147,6 @@ class TestRequestQueue(unittest.TestCase):
             for thread in threads:
                 thread.join()
             self.assertEqual(len(queue.qu), 1)
-
 
 class TestInput(unittest.TestCase):
     def _feed(self, sv: Supervisor, data: bytes) -> threading.Thread:
@@ -181,7 +175,6 @@ class TestInput(unittest.TestCase):
         thread = self._feed(sv, b"")
         self.assertFalse(thread.is_alive())
         self.assertFalse(sv.run)
-
 
 class TestInputUIState(unittest.TestCase):
     def _run(self, data: bytes, **state: Any) -> Supervisor:
@@ -224,7 +217,6 @@ class TestInputUIState(unittest.TestCase):
         self.assertIs(sv.ui.mode, ViewMode.NORMAL)
         self.assertEqual(sv.ui.scroll, -1)
 
-
 class TestWatcher(unittest.TestCase):
     def test_command_is_taken_atomically_and_cleared(self) -> None:
         sv = Supervisor()
@@ -245,7 +237,6 @@ class TestWatcher(unittest.TestCase):
         self.assertEqual(seen, ["/n"])
         self.assertEqual(sv.ui.command, "")
 
-
 class TestGuardedThreads(unittest.TestCase):
     def test_failing_worker_is_reported_and_restarted(self) -> None:
         sv = Supervisor()
@@ -261,7 +252,6 @@ class TestGuardedThreads(unittest.TestCase):
             sv._guarded("worker", flaky)()
         self.assertEqual(len(calls), 2)
         self.assertIn("boom", sv.ui.notification)
-
 
 if __name__ == "__main__":
     unittest.main()

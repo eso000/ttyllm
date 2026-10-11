@@ -2,27 +2,22 @@ import contextlib
 import io
 import os
 import signal
-import sys
 import threading
 import unittest
 from collections.abc import Callable, Iterator
 from typing import Any
 from unittest import mock
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-import supervisor as supervisor_module
-import view as view_module
-from buffer import Buffer
-from models import Model, ModelList
-from requester import Requester
-from supervisor import Supervisor
+from ai_chat import supervisor as supervisor_module
+from ai_chat import view as view_module
+from ai_chat.buffer import Buffer
+from ai_chat.models import Model, ModelList
+from ai_chat.requester import Requester
+from ai_chat.supervisor import Supervisor
 from test_input_handler import stdin_with
-
 
 def message(role: str, content: str = "") -> dict[str, Any]:
     return {"role": role, "content": content}
-
 
 class TestConstruction(unittest.TestCase):
     def test_creating_a_supervisor_has_no_side_effects(self) -> None:
@@ -48,7 +43,6 @@ class TestConstruction(unittest.TestCase):
         self.assertIs(sv.commands.sv, sv)
         self.assertIs(sv.keyboard.sv, sv)
         self.assertIs(sv.view.sv, sv)
-
 
 class TestBufferNavigation(unittest.TestCase):
     def setUp(self) -> None:
@@ -77,7 +71,6 @@ class TestBufferNavigation(unittest.TestCase):
         self.sv.buffers[0].updated = False
         self.sv.buffer_previous()
         self.assertTrue(self.sv.buffers[0].updated)
-
 
 class TestSplit(unittest.TestCase):
     def setUp(self) -> None:
@@ -113,7 +106,6 @@ class TestSplit(unittest.TestCase):
         self.sv.split()
         self.assertEqual(len(self.sv.buffers), 1)
         self.assertIn("pending tool calls", self.sv.ui.notification)
-
 
 class TestDelete(unittest.TestCase):
     def setUp(self) -> None:
@@ -177,7 +169,6 @@ class TestDelete(unittest.TestCase):
         self.assertTrue(woken.wait(2))
         thread.join(2)
 
-
 class TestMessageOperations(unittest.TestCase):
     def setUp(self) -> None:
         self.sv = Supervisor()
@@ -218,7 +209,6 @@ class TestMessageOperations(unittest.TestCase):
         self.sv.start_over()
         self.assertEqual(other.chat_data["messages"], before)
 
-
 @contextlib.contextmanager
 def fake_terminal_into(events: list[str]) -> Iterator[None]:
     events.append("terminal in")
@@ -226,7 +216,6 @@ def fake_terminal_into(events: list[str]) -> Iterator[None]:
         yield
     finally:
         events.append("terminal out")
-
 
 class TestRunChat(unittest.TestCase):
     def setUp(self) -> None:
@@ -349,7 +338,6 @@ class TestRunChat(unittest.TestCase):
             [],
         )
 
-
 class TestResize(unittest.TestCase):
     def setUp(self) -> None:
         self.sv = Supervisor()
@@ -365,7 +353,7 @@ class TestResize(unittest.TestCase):
             self.addCleanup(patcher.stop)
 
     def _resize(self, columns: int, lines: int) -> None:
-        with mock.patch("state.shutil.get_terminal_size") as size:
+        with mock.patch("ai_chat.state.shutil.get_terminal_size") as size:
             size.return_value = os.terminal_size((columns, lines))
             self.sv.handle_sigwinch(signal.SIGWINCH, None)
 
@@ -381,7 +369,6 @@ class TestResize(unittest.TestCase):
         self.sv.current_buffer.updated = False
         self._resize(100, 30)
         self.assertTrue(self.sv.current_buffer.updated)
-
 
 class TestGuarded(unittest.TestCase):
     def test_a_failure_names_the_thread(self) -> None:
@@ -406,7 +393,6 @@ class TestGuarded(unittest.TestCase):
         calls: list[int] = []
         sv._guarded("render", lambda: calls.append(1))()
         self.assertEqual(calls, [])
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,27 +1,22 @@
 import dataclasses
 import json
 import os
-import sys
 import tempfile
 import threading
 import unittest
 from unittest import mock
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from commands import Commands
-from models import Model
-from requester import Requester
-from state import ViewMode
-from supervisor import Supervisor
-
+from ai_chat.commands import Commands
+from ai_chat.models import Model
+from ai_chat.requester import Requester
+from ai_chat.state import ViewMode
+from ai_chat.supervisor import Supervisor
 
 class CommandsTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self.sv = Supervisor()
         self.commands = self.sv.commands
         self.sv.buffers[0].add_msg("system")
-
 
 class TestExecute(CommandsTestCase):
     def test_quit_returns_false(self) -> None:
@@ -44,7 +39,6 @@ class TestExecute(CommandsTestCase):
                 with self.subTest(command=name):
                     sv = Supervisor()
                     self.assertTrue(sv.commands.execute(f":{name} unexpected extra"))
-
 
 class TestCommandTable(CommandsTestCase):
     def test_buffer_commands_are_the_supervisors_own_methods(self) -> None:
@@ -93,7 +87,6 @@ class TestCommandTable(CommandsTestCase):
             with self.subTest(command=name):
                 self.assertTrue(entry.description.strip())
 
-
 class TestViews(CommandsTestCase):
     def test_each_view_command_selects_its_state(self) -> None:
         for name, state in (
@@ -140,14 +133,12 @@ class TestViews(CommandsTestCase):
         self.assertTrue(free, "set_view took the buffer lock before the ui lock")
         self.assertFalse(thread.is_alive())
 
-
 class TestRoles(CommandsTestCase):
     def test_role_commands_change_the_current_message(self) -> None:
         for name, role in (("ai", "assistant"), ("us", "user"), ("sys", "system")):
             with self.subTest(command=name):
                 self.commands.execute(f":{name}")
                 self.assertEqual(self.sv.current_data["messages"][-1]["role"], role)
-
 
 class TestBuffers(CommandsTestCase):
     def test_create_and_navigate(self) -> None:
@@ -203,7 +194,6 @@ class TestBuffers(CommandsTestCase):
         self.commands.execute(":r")
         self.assertTrue(self.sv.queue.has_scheduled)
 
-
 class TestModelCommands(CommandsTestCase):
     def test_switch_model(self) -> None:
         self.commands.execute(":sm llama3.2")
@@ -226,7 +216,6 @@ class TestModelCommands(CommandsTestCase):
             self.commands.execute(":mr")
         self.assertEqual(self.sv.ui.notification, "loaded 2 models")
 
-
 class TestOptions(CommandsTestCase):
     def test_set_stream(self) -> None:
         self.commands.execute(":o stream 0")
@@ -246,7 +235,6 @@ class TestOptions(CommandsTestCase):
         self.commands.execute(":o")
         self.assertIn("top_k", self.sv.ui.notification)
 
-
 class TestVisual(CommandsTestCase):
     def test_set_names(self) -> None:
         self.commands.execute(":v un me")
@@ -259,7 +247,6 @@ class TestVisual(CommandsTestCase):
     def test_unknown_key_is_reported(self) -> None:
         self.commands.execute(":v zz 1")
         self.assertIn("zz", self.sv.ui.notification)
-
 
 class TestFiles(CommandsTestCase):
     def test_export_then_import_round_trips(self) -> None:
@@ -288,7 +275,6 @@ class TestFiles(CommandsTestCase):
         self.commands.execute(":e /does/not/exist/chat.json")
         self.assertIn("not found", self.sv.ui.notification)
 
-
 class TestImages(CommandsTestCase):
     def _user_message(self) -> None:
         self.sv.current_buffer.change_msg("user")
@@ -315,7 +301,6 @@ class TestImages(CommandsTestCase):
         self.commands.execute(":image /does/not/exist.png")
         self.assertIn("not found", self.sv.ui.notification)
 
-
 class TestHelpText(CommandsTestCase):
     def test_merged_commands_keep_distinct_descriptions(self) -> None:
         text = self.commands.help_text()
@@ -332,7 +317,6 @@ class TestHelpText(CommandsTestCase):
     def test_every_command_has_a_description(self) -> None:
         for name, command in Commands(self.sv).table.items():
             self.assertTrue(command.description, name)
-
 
 if __name__ == "__main__":
     unittest.main()

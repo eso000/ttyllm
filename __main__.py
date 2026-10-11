@@ -1,9 +1,10 @@
+"""Run ai_chat straight from a checkout: ``python3 .`` (no install needed)."""
+
+import os
 import sys
 
-from supervisor import Supervisor
-from buffer import Buffer
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "src"))
 
-if __name__ == "__main__":
-    if "-t" in sys.argv:
-        Buffer.TOOLS = True
-    Supervisor(open_api="-o" in sys.argv).run_chat()
+from ai_chat.cli import main  # noqa: E402  (path must be set up first)
+
+raise SystemExit(main())

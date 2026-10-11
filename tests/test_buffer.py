@@ -1,14 +1,9 @@
-import os
-import sys
 import unittest
 from typing import Any
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from buffer import Buffer
+from ai_chat.buffer import Buffer
 
 DEFAULT_MODEL = "llama3.2"
-
 
 class TestSetData(unittest.TestCase):
     def _import(self, chat: dict[str, Any]) -> Buffer:
@@ -94,7 +89,6 @@ class TestSetData(unittest.TestCase):
             {"model": "m", "messages": [{"role": "user", "content": "hi"}]}
         )
         self.assertEqual(buffer.chat_data["model"], "m")
-
 
 if __name__ == "__main__":
     unittest.main()

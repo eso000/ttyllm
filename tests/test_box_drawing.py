@@ -1,11 +1,7 @@
-import os
-import sys
 import unittest
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from box_drawing import make_text_box, text_to_lines
-from buffer import Buffer, ColorCodeException
+from ai_chat.box_drawing import make_text_box, text_to_lines
+from ai_chat.buffer import Buffer, ColorCodeException
 
 SAMPLES: list[str] = [
     "hi there friend",
@@ -24,7 +20,6 @@ EDGE_SAMPLES: list[str] = [
     "trailing space ",
     " leading",
 ]
-
 
 class TestTextToLines(unittest.TestCase):
     def test_short_text_is_one_line(self) -> None:
@@ -85,7 +80,6 @@ class TestTextToLines(unittest.TestCase):
     def test_negative_width_returns_empty_line(self) -> None:
         self.assertEqual(text_to_lines("hello", -3), [""])
 
-
 class TestColorParsing(unittest.TestCase):
     def setUp(self) -> None:
         self.buffer = Buffer()
@@ -121,7 +115,6 @@ class TestColorParsing(unittest.TestCase):
         with self.assertRaises(ColorCodeException):
             self._set_color("rgb:1;2")
 
-
 class TestMakeTextBox(unittest.TestCase):
     def test_lines_and_last(self) -> None:
         box = make_text_box("one\ntwo", 10, last=4)
@@ -130,7 +123,6 @@ class TestMakeTextBox(unittest.TestCase):
 
     def test_narrow_width_does_not_hang(self) -> None:
         self.assertEqual(make_text_box("a long line here", 0).lines, [""])
-
 
 class TestBufferNarrowTerminal(unittest.TestCase):
     def test_get_text_box_zero_width(self) -> None:
@@ -153,7 +145,6 @@ class TestBufferNarrowTerminal(unittest.TestCase):
         self.assertTrue(
             any(line.endswith("hi") for line in buffer.get_text_box(5).lines)
         )
-
 
 if __name__ == "__main__":
     unittest.main()
