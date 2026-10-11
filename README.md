@@ -29,6 +29,9 @@ HTTP library standing between you and the wire protocol.
   `-H/--endpoint` flag or the `:endp` command, including `https://` URLs. The
   scheme is kept, `https://` selects TLS, and `-k/--insecure` allows a
   self-signed local certificate.
+- **API keys** — send a bearer token on every request from a raw value, an
+  environment variable, or a file (`--api-key`, `--api-key-env`,
+  `--api-key-file`).
 - **Import / export** chats as JSON.
 - **Vim-style command mode** with tab completion (`:`, `/`).
 
@@ -50,9 +53,19 @@ python3 . -o         # use an OpenAI-compatible API (/v1/chat/completions)
 python3 . -t         # enable tool calling (asks for approval before running)
 python3 . -H http://127.0.0.1:8080   # point at another server (https selects TLS)
 python3 . -H https://local:8443 -k   # https with a self-signed certificate
+python3 . -o -H https://openrouter.ai/api/v1 --api-key-env OPENROUTER_API_KEY \
+  # bearer key from an environment variable
+python3 . -o --api-key-file ~/.keys/openai   # or read the key from a file
 python3 . --version  # print the version
 python3 . --help     # show all options
 ```
+
+When set, the API key is sent in an `Authorization: Bearer` header on every
+request. It can come from a raw value (`--api-key KEY`), an environment
+variable (`--api-key-env NAME`) or a file (`--api-key-file PATH`); the three
+flags are mutually exclusive. Prefer the env var or file over `--api-key`,
+because a raw value is visible in process listings and shell history. A key
+source that can't be resolved is silently skipped and no header is sent.
 
 Optionally install it to get the `ai-chat` command (and `python -m ai_chat`):
 

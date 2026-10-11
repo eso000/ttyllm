@@ -16,6 +16,7 @@ from .requester import Requester
 from .state import UIState
 from .terminal import raw_terminal
 from .view import View
+from .api_key import ApiKey
 
 
 class Supervisor:
@@ -25,6 +26,7 @@ class Supervisor:
         open_api: bool = False,
         endpoint: str | None = None,
         insecure: bool = False,
+        api_key: ApiKey | None = None,
     ) -> None:
 
         """set up buffers, commands and request queue, run_chat loads the models"""
@@ -34,7 +36,7 @@ class Supervisor:
         self.current_buffer_id: int = 0
         self.ui: UIState = UIState.from_terminal()
         self.requester: Requester = Requester(
-            open_api=open_api, tls_verify=not insecure
+            open_api=open_api, tls_verify=not insecure, api_key=api_key
         )
         if endpoint is not None:
             self.requester.set_endpoint(endpoint)

@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 from .buffer import Buffer
 from .models import ModelList
 from .tool import Tool
+from .api_key import ApiKey
 from . import toolchain
 
 
@@ -25,6 +26,7 @@ class Requester:
         open_api: bool = False,
         tls: bool = False,
         tls_verify: bool = True,
+        api_key: ApiKey | None = None,
     ) -> None:
         """configure the client for host and port, tls wraps the socket in TLS"""
         self.max_recv: int = 1024
@@ -35,6 +37,7 @@ class Requester:
         self.open_api: bool = open_api
         self.tls: bool = tls
         self.tls_verify: bool = tls_verify
+        self.api_key: ApiKey | None = api_key
         self._endpoint: str = f"{host}:{port}"
         self._tls_context: ssl.SSLContext | None = None
         self.models_error: str | None = None
@@ -114,6 +117,13 @@ class Requester:
             f"{error.__class__.__name__}: {text}" if text else error.__class__.__name__
         )
 
+    def _auth_headers(self) -> list[str]:
+        """the bearer Authorization header for the API key, or nothing when unavailable"""
+        key = self.api_key.get_key() if self.api_key is not None else None
+        if key is None:
+            return []
+        return [f"Authorization: Bearer {key}"]
+
     def make_post(self, d: dict[str, Any]) -> str:
         """assemble a raw HTTP/1.1 POST request with a JSON body"""
         body = json.dumps(d)
@@ -126,7 +136,7 @@ class Requester:
             f"HOST: {self.host}",
             "Content-Type: application/json",
             f"Content-Length: {len(body)}",
-        ]
+        ] + self._auth_headers()
 
         request = "\r\n".join(headers) + "\r\n\r\n" + body
         return request
@@ -240,6 +250,7 @@ class Requester:
                             f"GET {path} HTTP/1.1",
                             f"HOST: {self.host}",
                         ]
+                        + self._auth_headers()
                     )
                     + "\r\n\r\n"
                 )

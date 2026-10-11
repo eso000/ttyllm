@@ -4,6 +4,7 @@ from unittest import mock
 from ai_chat import cli
 from ai_chat.requester import Requester
 from ai_chat.supervisor import Supervisor
+from ai_chat.api_key import ApiKey, ApiKeyType
 
 
 class TestParser(unittest.TestCase):
@@ -25,6 +26,26 @@ class TestParser(unittest.TestCase):
         self.assertTrue(cli.build_parser().parse_args(["-k"]).insecure)
         self.assertTrue(cli.build_parser().parse_args(["--insecure"]).insecure)
 
+    def test_api_key_flags_are_parsed(self) -> None:
+        args = cli.build_parser().parse_args(["--api-key", "sk-123"])
+        self.assertEqual(args.api_key, "sk-123")
+        args = cli.build_parser().parse_args(["--api-key-env", "MY_KEY"])
+        self.assertEqual(args.api_key_env, "MY_KEY")
+        args = cli.build_parser().parse_args(["--api-key-file", "/tmp/key"])
+        self.assertEqual(args.api_key_file, "/tmp/key")
+
+    def test_api_key_flags_default_off(self) -> None:
+        args = cli.build_parser().parse_args([])
+        self.assertIsNone(args.api_key)
+        self.assertIsNone(args.api_key_env)
+        self.assertIsNone(args.api_key_file)
+
+    def test_api_key_flags_are_mutually_exclusive(self) -> None:
+        with self.assertRaises(SystemExit):
+            cli.build_parser().parse_args(
+                ["--api-key", "a", "--api-key-env", "B"]
+            )
+
 
 class TestMain(unittest.TestCase):
     def test_options_are_passed_to_the_supervisor(self) -> None:
@@ -33,7 +54,22 @@ class TestMain(unittest.TestCase):
         ) as init, mock.patch.object(Supervisor, "run_chat"):
             cli.main(["--endpoint", "https://local:99", "--insecure"])
         init.assert_called_once_with(
-            open_api=False, endpoint="https://local:99", insecure=True
+            open_api=False,
+            endpoint="https://local:99",
+            insecure=True,
+            api_key=None,
+        )
+
+    def test_api_key_is_passed_to_the_supervisor(self) -> None:
+        with mock.patch.object(
+            Supervisor, "__init__", return_value=None
+        ) as init, mock.patch.object(Supervisor, "run_chat"):
+            cli.main(["--api-key", "sk-123"])
+        init.assert_called_once_with(
+            open_api=False,
+            endpoint=None,
+            insecure=False,
+            api_key=ApiKey("sk-123", ApiKeyType.RAW),
         )
 
     def test_endpoint_is_applied_before_the_chat_runs(self) -> None:

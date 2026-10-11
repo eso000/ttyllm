@@ -1,5 +1,6 @@
 import json
 import os
+import queue
 import re
 import select
 import shutil
@@ -19,6 +20,7 @@ from ai_chat.commands import Commands
 from ai_chat.state import UIState
 from ai_chat.supervisor import Supervisor
 from ai_chat.buffer import Buffer
+from ai_chat.api_key import ApiKey, ApiKeyType
 
 GIB = 1073741824
 
@@ -67,6 +69,30 @@ def _serve_once(response: bytes) -> tuple[int, threading.Thread]:
     thread = threading.Thread(target=run, daemon=True)
     thread.start()
     return port, thread
+
+def _serve_capture(response: bytes) -> tuple[int, threading.Thread, queue.Queue[bytes]]:
+    """start a one-shot http server that records the request it receives"""
+    received: queue.Queue[bytes] = queue.Queue()
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+    port = server.getsockname()[1]
+
+    def run() -> None:
+        try:
+            conn, _ = server.accept()
+            with conn:
+                data = conn.recv(1024)
+                received.put(data)
+                conn.sendall(response)
+        except OSError:
+            pass
+        finally:
+            server.close()
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    return port, thread, received
 
 def _closed_port() -> int:
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -268,6 +294,41 @@ class TestGetModels(unittest.TestCase):
         request.set_endpoint(("127.0.0.1", port))
         request.get_models()
         self.assertIsNone(request.models_error)
+
+class TestApiKeyHeader(unittest.TestCase):
+    def test_post_has_bearer_header_when_a_key_is_set(self) -> None:
+        request = Requester(api_key=ApiKey("sk-123", ApiKeyType.RAW))
+        self.assertIn("Authorization: Bearer sk-123", request.make_post({"a": 1}))
+
+    def test_post_has_no_header_without_a_key(self) -> None:
+        self.assertNotIn("Authorization", Requester().make_post({"a": 1}))
+
+    def test_post_has_no_header_when_env_var_is_missing(self) -> None:
+        with mock.patch.dict(os.environ):
+            os.environ.pop("AI_CHAT_TEST_KEY", None)
+            request = Requester(
+                open_api=True, api_key=ApiKey("AI_CHAT_TEST_KEY", ApiKeyType.ENV)
+            )
+            self.assertNotIn("Authorization", request.make_post({"a": 1}))
+
+    def test_models_request_has_bearer_header_when_a_key_is_set(self) -> None:
+        port, _, received = _serve_capture(
+            _http_response({"data": [{"id": "gpt-4o"}]})
+        )
+        request = Requester(
+            port=port, open_api=True, api_key=ApiKey("sk-123", ApiKeyType.RAW)
+        )
+        self.assertEqual(list(request.get_models()), [Model("gpt-4o")])
+        self.assertIn(b"Authorization: Bearer sk-123", received.get(timeout=5))
+
+    def test_models_request_has_no_header_without_a_key(self) -> None:
+        port, _, received = _serve_capture(
+            _http_response({"data": [{"id": "gpt-4o"}]})
+        )
+        request = Requester(port=port, open_api=True)
+        self.assertEqual(list(request.get_models()), [Model("gpt-4o")])
+        self.assertNotIn(b"Authorization", received.get(timeout=5))
+
 
 class TestEndpoint(unittest.TestCase):
     def test_https_url_enables_tls_on_the_default_port(self) -> None:
