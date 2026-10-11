@@ -7,7 +7,8 @@ I created this project as a goal to see how far a chat client can be pushed
 without pulling in a single third-party package. To keep everything
 transparent, the HTTP layer is implemented on **raw sockets**: requests are
 assembled and responses (headers, chunked transfer encoding, NDJSON and SSE
-streams) are parsed by hand in [`requester.py`](requester.py), so there is no
+streams) are parsed by hand in
+[`src/ai_chat/requester.py`](src/ai_chat/requester.py), so there is no
 HTTP library standing between you and the wire protocol.
 
 ## Features
