@@ -1,5 +1,6 @@
 import base64
 import dataclasses
+import inspect
 import json
 from collections.abc import Callable
 from functools import partial
@@ -14,10 +15,23 @@ if TYPE_CHECKING:
 
 @dataclasses.dataclass(frozen=True)
 class Command:
-    """a colon command, its one line description and whether it takes arguments"""
+    """a colon command, its one line description, arguments and extra detail"""
     handler: Callable[..., None]
     description: str
     takes_args: bool = False
+    detail: str | None = None
+
+
+def _first_line(doc: str | None) -> str:
+    """the summary line of a docstring, empty when there is none"""
+    lines = inspect.cleandoc(doc or "").splitlines()
+    return lines[0].strip() if lines else ""
+
+
+def _rest_lines(doc: str | None) -> str | None:
+    """the lines after the docstring summary, None when there are none"""
+    rest = "\n".join(inspect.cleandoc(doc or "").splitlines()[1:]).strip()
+    return rest or None
 
 
 class Commands:
@@ -67,7 +81,12 @@ class Commands:
     @staticmethod
     def _command(handler: Callable[..., None], takes_args: bool = False) -> Command:
         """a command described by the docstring of its handler"""
-        return Command(handler, handler.__doc__ or "", takes_args)
+        return Command(
+            handler,
+            _first_line(handler.__doc__),
+            takes_args,
+            _rest_lines(handler.__doc__),
+        )
 
     @property
     def _buffer(self) -> Buffer:
@@ -97,14 +116,19 @@ class Commands:
         return True
 
     def help_text(self) -> str:
-        """build the help screen from the command descriptions"""
+        """build the help screen from the command descriptions and details"""
         lines = [
             "commands  (up/down: scroll, enter: back to chat)",
             "",
             "q:\tquit",  # handled by the input handler, not a table command
         ]
+        details = []
         for name, command in self.table.items():
             lines.append(f"{name}:\t{command.description}")
+            if command.detail is not None:
+                details.append(f"{name}:\n{command.detail}")
+        if details:
+            lines.extend(["", "details:", "", "\n\n".join(details)])
         return "\n".join(lines)
 
     def set_view(self, view: ViewMode, scroll: int | None) -> None:
@@ -193,7 +217,15 @@ class Commands:
             self.sv.show_notification(f"File {args[0]} not found")
 
     def options(self, *args: str) -> None:
-        """show or set options -- arguments: k|p|t|pen|stream value"""
+        """show or set sampling options
+
+        k: top_k (int)
+        p: top_p (float)
+        t: temperature (float)
+        pen: repeat_penalty (float)
+        stream: 0 or 1
+        with no argument the current options are shown
+        """
         if len(args) == 0:
             self.sv.show_notification(json.dumps(self._buffer.options, indent=3))
         elif len(args) == 1:
@@ -205,7 +237,7 @@ class Commands:
                 case "p":
                     self._buffer.top_p = float(args[1])
                 case "t":
-                    self._buffer.temperature = int(args[1])
+                    self._buffer.temperature = float(args[1])
                 case "pen":
                     self._buffer.repeat_penalty = float(args[1])
                 case "stream":
@@ -214,7 +246,16 @@ class Commands:
                     self.sv.show_notification(f"command {args[0]} not found")
 
     def visual(self, *args: str) -> None:
-        """show or set looks -- arguments: un|an|uc|ac|nc value"""
+        """show or set names and colors
+
+        un: user name
+        an: assistant name
+        uc: user color
+        ac: assistant color
+        nc: normal color
+        color formats: 8b:N | 256b:N | rgb:R;G;B
+        with no argument the current values are shown
+        """
         if len(args) == 0:
             self.sv.show_notification(json.dumps(self._buffer.visual_data, indent=3))
         elif len(args) == 1:

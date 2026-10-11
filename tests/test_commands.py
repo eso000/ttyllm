@@ -6,7 +6,7 @@ import threading
 import unittest
 from unittest import mock
 
-from ai_chat.commands import Commands
+from ai_chat.commands import Commands, _first_line, _rest_lines
 from ai_chat.models import Model
 from ai_chat.requester import Requester
 from ai_chat.state import ViewMode
@@ -283,6 +283,10 @@ class TestOptions(CommandsTestCase):
         self.commands.execute(":o stream 1")
         self.assertTrue(self.sv.current_data["stream"])
 
+    def test_set_fractional_temperature(self) -> None:
+        self.commands.execute(":o t 0.8")
+        self.assertEqual(self.sv.current_buffer.temperature, 0.8)
+
     def test_unknown_option_is_reported(self) -> None:
         self.commands.execute(":o bogus 1")
         self.assertIn("bogus", self.sv.ui.notification)
@@ -377,6 +381,36 @@ class TestHelpText(CommandsTestCase):
     def test_every_command_has_a_description(self) -> None:
         for name, command in Commands(self.sv).table.items():
             self.assertTrue(command.description, name)
+
+    def test_multiline_docstrings_add_a_details_section(self) -> None:
+        text = self.commands.help_text()
+        self.assertIn("o:\tshow or set sampling options", text)
+        self.assertIn("details:", text)
+        self.assertIn("o:\nk: top_k (int)", text)
+        self.assertIn("v:\nun: user name", text)
+
+    def test_only_multiline_commands_are_in_the_details(self) -> None:
+        text = self.commands.help_text()
+        details = text.split("details:\n\n", 1)[1]
+        for name, command in self.commands.table.items():
+            if command.detail is None:
+                self.assertNotIn(f"{name}:\n", details)
+
+
+class TestDocstringSplit(unittest.TestCase):
+    def test_the_first_line_becomes_the_description(self) -> None:
+        self.assertEqual(_first_line("summary\n\nmore\nlines"), "summary")
+
+    def test_the_rest_becomes_the_detail(self) -> None:
+        self.assertEqual(_rest_lines("summary\n\nmore\nlines"), "more\nlines")
+
+    def test_a_single_line_docstring_has_no_detail(self) -> None:
+        self.assertEqual(_first_line("only a summary"), "only a summary")
+        self.assertIsNone(_rest_lines("only a summary"))
+
+    def test_a_missing_docstring_is_empty(self) -> None:
+        self.assertEqual(_first_line(None), "")
+        self.assertIsNone(_rest_lines(None))
 
 if __name__ == "__main__":
     unittest.main()
