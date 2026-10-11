@@ -34,14 +34,14 @@ class Commands:
             "S": Command(
                 partial(self.set_view, ViewMode.SYSTEM, None), "show system prompt"
             ),
-            "s": self._command(supervisor.split),
-            "r": self._command(supervisor.redo),
-            "R": self._command(supervisor.start_over),
-            "rr": self._command(supervisor.undo),
-            "bc": self._command(supervisor.create_buffer),
-            "bn": self._command(supervisor.buffer_next),
-            "bp": self._command(supervisor.buffer_previous),
-            "bd": self._command(supervisor.buffer_delete),
+            "s": self._command(self.sv.split),
+            "r": self._command(self.sv.redo),
+            "R": self._command(self.sv.start_over),
+            "rr": self._command(self.sv.undo),
+            "bc": self._command(self.sv.create_buffer),
+            "bn": self._command(self.sv.buffer_next),
+            "bp": self._command(self.sv.buffer_previous),
+            "bd": self._command(self.sv.buffer_delete),
             "sm": self._command(self.switch_model, takes_args=True),
             "ai": Command(
                 partial(self.change_role, "assistant"),
@@ -56,11 +56,12 @@ class Commands:
             ),
             "i": self._command(self.import_chat, takes_args=True),
             "e": self._command(self.export_chat, takes_args=True),
+            "endp": self._command(self.sv.set_endpoint, takes_args=True),
             "v": self._command(self.visual, takes_args=True),
             "o": self._command(self.options, takes_args=True),
             "image": self._command(self.add_image, takes_args=True),
             "rmi": self._command(self.remove_image),
-            "-": self._command(supervisor.correct),
+            "-": self._command(self.sv.correct),
         }
 
     @staticmethod

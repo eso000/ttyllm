@@ -58,10 +58,10 @@ class TestCommandTable(CommandsTestCase):
 
     def test_exactly_the_commands_with_arguments_take_them(self) -> None:
         takes = {n for n, c in self.commands.table.items() if c.takes_args}
-        self.assertEqual(takes, {"sm", "i", "e", "v", "o", "image"})
+        self.assertEqual(takes, {"sm", "i", "e", "endp", "v", "o", "image"})
 
     def test_arguments_reach_the_commands_that_take_them(self) -> None:
-        for name in ("sm", "i", "e", "v", "o", "image"):
+        for name in ("sm", "i", "e", "endp", "v", "o", "image"):
             with self.subTest(command=name):
                 handler = mock.Mock()
                 entry = dataclasses.replace(self.commands.table[name], handler=handler)
@@ -215,6 +215,66 @@ class TestModelCommands(CommandsTestCase):
         ):
             self.commands.execute(":mr")
         self.assertEqual(self.sv.ui.notification, "loaded 2 models")
+
+class TestEndpoint(CommandsTestCase):
+    def _with_models(self):
+        return mock.patch.object(Requester, "get_models", return_value=[Model("a")])
+
+    def test_sets_host_and_port_from_host_colon_port(self) -> None:
+        with self._with_models():
+            self.commands.execute(":endp 192.168.1.5:8080")
+        self.assertEqual(self.sv.requester.host, "192.168.1.5")
+        self.assertEqual(self.sv.requester.port, 8080)
+        self.assertIn("192.168.1.5:8080", self.sv.ui.notification)
+
+    def test_two_arguments_set_host_and_port(self) -> None:
+        with self._with_models():
+            self.commands.execute(":endp 10.0.0.2 11434")
+        self.assertEqual(self.sv.requester.host, "10.0.0.2")
+        self.assertEqual(self.sv.requester.port, 11434)
+
+    def test_https_url_enables_tls(self) -> None:
+        with self._with_models():
+            self.commands.execute(":endp https://api.example.com:443")
+        self.assertTrue(self.sv.requester.tls)
+        self.assertEqual(self.sv.requester.port, 443)
+
+    def test_scheme_less_token_keeps_the_current_port(self) -> None:
+        before = self.sv.requester.port
+        with self._with_models():
+            self.commands.execute(":endp otherhost")
+        self.assertEqual(self.sv.requester.host, "otherhost")
+        self.assertEqual(self.sv.requester.port, before)
+
+    def test_without_arguments_shows_the_endpoint(self) -> None:
+        self.commands.execute(":endp")
+        self.assertIn(self.sv.requester.endpoint, self.sv.ui.notification)
+
+    def test_slash_prefix_shows_the_endpoint(self) -> None:
+        self.commands.execute("/endp")
+        self.assertEqual(
+            self.sv.ui.notification, f"endpoint: {self.sv.requester.endpoint}"
+        )
+
+    def test_empty_arguments_show_the_endpoint_too(self) -> None:
+        before = self.sv.requester.endpoint
+        self.commands.execute(":endp  ")
+        self.assertIn(self.sv.requester.endpoint, self.sv.ui.notification)
+        self.assertEqual(self.sv.requester.endpoint, before)
+
+    def test_invalid_port_is_reported_and_nothing_changes(self) -> None:
+        before = self.sv.requester.endpoint
+        self.commands.execute(":endp host:notaport")
+        self.assertIn("invalid endpoint", self.sv.ui.notification)
+        self.assertEqual(self.sv.requester.endpoint, before)
+
+    def test_port_out_of_range_is_reported(self) -> None:
+        self.commands.execute(":endp host 99999")
+        self.assertIn("out of range", self.sv.ui.notification)
+
+    def test_too_many_arguments_are_reported(self) -> None:
+        self.commands.execute(":endp a b c")
+        self.assertIn("usage", self.sv.ui.notification)
 
 class TestOptions(CommandsTestCase):
     def test_set_stream(self) -> None:

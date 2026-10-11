@@ -20,7 +20,12 @@ from .view import View
 
 class Supervisor:
     """owns the buffers, threads and terminal, and drives the whole chat"""
-    def __init__(self, open_api: bool = False) -> None:
+    def __init__(
+        self,
+        open_api: bool = False,
+        endpoint: str | None = None,
+        insecure: bool = False,
+    ) -> None:
 
         """set up buffers, commands and request queue, run_chat loads the models"""
         self.open_api: bool = open_api
@@ -28,7 +33,11 @@ class Supervisor:
         self.buffers: list[Buffer] = [Buffer()]
         self.current_buffer_id: int = 0
         self.ui: UIState = UIState.from_terminal()
-        self.requester: Requester = Requester(open_api=open_api)
+        self.requester: Requester = Requester(
+            open_api=open_api, tls_verify=not insecure
+        )
+        if endpoint is not None:
+            self.requester.set_endpoint(endpoint)
 
         self.run: bool = True
 
@@ -165,7 +174,7 @@ class Supervisor:
 
     def _models_problem(self) -> str | None:
         """describe why the model list is unusable, None when it is fine"""
-        endpoint = f"{self.requester.host}:{self.requester.port}"
+        endpoint = self.requester.endpoint
         if self.requester.models_error:
             return f"cannot reach {endpoint} - {self.requester.models_error}"
         if not self.models:
@@ -178,6 +187,33 @@ class Supervisor:
         if problem:
             self.show_notification(problem)
         return problem is not None
+
+    def set_endpoint(self, *args: str) -> None:
+        """show or set the server endpoint -- arguments: host[:port] [port]"""
+        parts = [arg for arg in args if arg]  # ignore empty tokens after the name
+        if len(parts) == 0:
+            self.show_notification(f"endpoint: {self.requester.endpoint}")
+            return
+        try:
+            if len(parts) == 1:
+                self.requester.set_endpoint(parts[0])
+            elif len(parts) == 2:
+                port = int(parts[1])
+                if not 1 <= port <= 65535:
+                    raise ValueError(f"port {port} out of range")
+                self.requester.set_endpoint((parts[0], port))
+            else:
+                self.show_notification("usage: :endp host[:port] [port]")
+                return
+        except ValueError as error:
+            self.show_notification(f"invalid endpoint: {error}")
+            return
+        self.load_models()
+        if not self.report_models():
+            self.show_notification(
+                f"endpoint set to {self.requester.endpoint} - "
+                f"loaded {len(self.models)} models"
+            )
 
     def handle_new_message(self) -> None:
         """schedule the current buffer after the user submitted a message"""

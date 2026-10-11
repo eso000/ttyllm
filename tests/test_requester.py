@@ -297,12 +297,36 @@ class TestEndpoint(unittest.TestCase):
         self.assertEqual(request.port, 11434)
         self.assertFalse(request.tls)
 
+    def test_bare_host_without_port_keeps_the_current_endpoint(self) -> None:
+        request = Requester(host="10.0.0.1", port=8080, tls=True)
+        request.set_endpoint("otherhost")
+        self.assertEqual(request.host, "otherhost")
+        self.assertEqual(request.port, 8080)
+        self.assertTrue(request.tls)
+
+    def test_invalid_port_raises_a_value_error(self) -> None:
+        with self.assertRaises(ValueError):
+            Requester().set_endpoint("localhost:notaport")
+
     def test_tuple_only_changes_host_and_port(self) -> None:
         request = Requester(tls=True)
         request.set_endpoint(("127.0.0.1", 11434))
         self.assertEqual(request.host, "127.0.0.1")
         self.assertEqual(request.port, 11434)
         self.assertTrue(request.tls)
+
+    def test_url_keeps_its_scheme_for_display(self) -> None:
+        request = Requester()
+        request.set_endpoint("https://local:99")
+        self.assertEqual(request.endpoint, "https://local:99")
+        self.assertEqual(request.host, "local")
+        self.assertEqual(request.port, 99)
+        self.assertTrue(request.tls)
+
+    def test_scheme_less_token_shows_the_effective_port(self) -> None:
+        request = Requester()
+        request.set_endpoint("otherhost")
+        self.assertEqual(request.endpoint, f"otherhost:{request.port}")
 
 class TestConnect(unittest.TestCase):
     def test_plain_connection_is_returned_as_is(self) -> None:
@@ -332,6 +356,12 @@ class TestConnect(unittest.TestCase):
             request._connect()
             request._connect()
         context_mock.assert_called_once()
+
+    def test_insecure_context_skips_verification(self) -> None:
+        request = Requester(host="local", port=99, tls=True, tls_verify=False)
+        context = request._ssl_context()
+        self.assertFalse(context.check_hostname)
+        self.assertEqual(context.verify_mode, ssl.CERT_NONE)
 
     def test_raw_socket_is_closed_when_wrapping_fails(self) -> None:
         request = Requester(host="api.example.com", tls=True)
@@ -384,8 +414,34 @@ class TestReplyErrors(unittest.TestCase):
     def test_connection_error_is_returned(self) -> None:
         chat = Buffer()
         error = Requester(port=_closed_port()).get_reply(chat)
-        self.assertIn("ConnectionRefusedError", error)  # type: ignore[arg-type]
+        self.assertIn("connection refused", error)  # type: ignore[arg-type]
         self.assertFalse(chat.in_request)
+
+    def test_unresolvable_host_is_reported_with_its_name(self) -> None:
+        request = Requester(host="local", port=99)
+        with mock.patch.object(
+            request, "_connect", side_effect=socket.gaierror("name not known")
+        ):
+            error = request.get_reply(Buffer())
+        self.assertIn("could not resolve 'local'", error)  # type: ignore[arg-type]
+
+    def test_plain_http_server_answering_https_suggests_http(self) -> None:
+        request = Requester(host="local", port=99, tls=True)
+        with mock.patch.object(
+            request, "_connect", side_effect=ssl.SSLError("WRONG_VERSION_NUMBER")
+        ):
+            error = request.get_reply(Buffer())
+        self.assertIn("http://", error)  # type: ignore[arg-type]
+
+    def test_untrusted_certificate_suggests_insecure(self) -> None:
+        request = Requester(host="local", port=99, tls=True)
+        with mock.patch.object(
+            request,
+            "_connect",
+            side_effect=ssl.SSLError(1, "CERTIFICATE_VERIFY_FAILED"),
+        ):
+            request.get_models()
+        self.assertIn("--insecure", request.models_error)  # type: ignore[arg-type]
 
     def test_http_error_is_returned(self) -> None:
         port, _ = _serve_once(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n")
@@ -443,7 +499,7 @@ class TestReplyErrors(unittest.TestCase):
         request = Requester(port=port)
         request.read_timeout = 0.2
         error = request.get_reply(Buffer())
-        self.assertIn("TimeoutError", error)  # type: ignore[arg-type]
+        self.assertIn("timed out", error)  # type: ignore[arg-type]
 
 class TestGetHeader(unittest.TestCase):
     def test_body_after_header_terminator_is_kept(self) -> None:

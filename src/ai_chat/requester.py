@@ -24,6 +24,7 @@ class Requester:
         port: int = 11434,
         open_api: bool = False,
         tls: bool = False,
+        tls_verify: bool = True,
     ) -> None:
         """configure the client for host and port, tls wraps the socket in TLS"""
         self.max_recv: int = 1024
@@ -33,29 +34,51 @@ class Requester:
         self.port: int = port
         self.open_api: bool = open_api
         self.tls: bool = tls
+        self.tls_verify: bool = tls_verify
+        self._endpoint: str = f"{host}:{port}"
         self._tls_context: ssl.SSLContext | None = None
         self.models_error: str | None = None
+
+    @property
+    def endpoint(self) -> str:
+        """the endpoint as it was entered, "https://local:99" or "127.0.0.1:11434" """
+        return self._endpoint
 
     def set_endpoint(self, endpoint: tuple[str, int] | str) -> None:
         """point the client at a new host, accepting a URL or a (host, port) tuple
 
-        a URL also selects the transport: "https://..." turns TLS on and defaults
-        to port 443, while "http://..." stays plain and defaults to port 80
+        a scheme only selects the transport: "https://..." turns TLS on and
+        defaults to port 443, while "http://..." stays plain and defaults to port
+        80. A token without a scheme keeps the current port and TLS, so
+        "localhost:11434" behaves like the (host, port) tuple form.
         """
         if isinstance(endpoint, str):
             parsed = urlsplit(endpoint if "//" in endpoint else f"//{endpoint}")
-            self.tls = parsed.scheme == "https"
-            self.host = parsed.hostname or "127.0.0.1"
-            self.port = parsed.port or (443 if self.tls else 80)
+            if parsed.scheme:
+                self.tls = parsed.scheme == "https"
+                default_port = 443 if self.tls else 80
+            else:
+                default_port = self.port
+            try:
+                port = parsed.port
+            except ValueError as error:
+                raise ValueError(f"invalid endpoint {endpoint!r}: {error}") from error
+            self.host = parsed.hostname or self.host
+            self.port = port or default_port
+            self._endpoint = endpoint if parsed.scheme else f"{self.host}:{self.port}"
             return
         host, port = endpoint
         self.host = host
         self.port = port
+        self._endpoint = f"{host}:{port}"
 
     def _ssl_context(self) -> ssl.SSLContext:
         """build and cache the default TLS context, reused across requests"""
         if self._tls_context is None:
             self._tls_context = ssl.create_default_context()
+            if not self.tls_verify:
+                self._tls_context.check_hostname = False
+                self._tls_context.verify_mode = ssl.CERT_NONE
         return self._tls_context
 
     def _connect(self) -> socket.socket:
@@ -71,6 +94,25 @@ class Requester:
             raise
         s.settimeout(None)
         return s
+
+    def _friendly_error(self, error: BaseException) -> str:
+        """a short, actionable description of a connection failure"""
+        text = str(error)
+        if isinstance(error, ssl.SSLError):
+            if "WRONG_VERSION_NUMBER" in text or "UNEXPECTED_EOF" in text:
+                return "the server does not speak TLS - try http:// instead of https://"
+            if "CERTIFICATE_VERIFY_FAILED" in text:
+                return "the certificate is not trusted - use -k/--insecure to allow it"
+            return f"TLS error: {text}"
+        if isinstance(error, socket.gaierror):
+            return f"could not resolve '{self.host}'"
+        if isinstance(error, ConnectionRefusedError):
+            return "connection refused"
+        if isinstance(error, TimeoutError):
+            return "the server sent no data (timed out)"
+        return (
+            f"{error.__class__.__name__}: {text}" if text else error.__class__.__name__
+        )
 
     def make_post(self, d: dict[str, Any]) -> str:
         """assemble a raw HTTP/1.1 POST request with a JSON body"""
@@ -213,7 +255,7 @@ class Requester:
                     return ModelList([])
                 return ModelList.from_response(self._handle_json(s, head, body))
         except (OSError, ValueError, IndexError, KeyError) as error:
-            self.models_error = str(error) or error.__class__.__name__
+            self.models_error = self._friendly_error(error)
             return ModelList([])
 
     def _handle_tool_call(
@@ -496,7 +538,9 @@ class Requester:
                 chat.cond.notify()
             if chat.cancel:
                 return None
-            return f"{error.__class__.__name__}: {error}"
+            if isinstance(error, OSError):
+                return f"cannot reach {self.endpoint} - {self._friendly_error(error)}"
+            return self._friendly_error(error)
         finally:
             if s is not None:
                 s.close()

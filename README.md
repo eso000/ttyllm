@@ -24,6 +24,10 @@ HTTP library standing between you and the wire protocol.
 - **Images** — attach base64-encoded images to the current message.
 - **Model management** — list models from the server, switch models per
   buffer, tune sampling options.
+- **Configurable endpoint** — point the client at any host with the
+  `-H/--endpoint` flag or the `:endp` command, including `https://` URLs. The
+  scheme is kept, `https://` selects TLS, and `-k/--insecure` allows a
+  self-signed local certificate.
 - **Import / export** chats as JSON.
 - **Vim-style command mode** with tab completion (`:`, `/`).
 
@@ -43,6 +47,8 @@ Run straight from a checkout (no install needed) with `python3 .`:
 python3 .            # chat against the default Ollama endpoint
 python3 . -o         # use an OpenAI-compatible API (/v1/chat/completions)
 python3 . -t         # enable tool calling (asks for approval before running)
+python3 . -H http://127.0.0.1:8080   # point at another server (https selects TLS)
+python3 . -H https://local:8443 -k   # https with a self-signed certificate
 python3 . --version  # print the version
 python3 . --help     # show all options
 ```
@@ -90,6 +96,7 @@ Run with `:h` (or see the table below) inside the app:
 | ------- | ----------- |
 | `:m` / `:mr` | list models / refresh model list |
 | `:sm <model>` | switch model |
+| `:endp <host>[:port] [port]` | show the current endpoint, or set it (`host:port`, two args, or an `http(s)://` URL) |
 | `:n` / `:d` / `:S` | show chat / raw data / system prompt |
 | `:s` / `:bc` / `:bn` / `:bp` / `:bd` | split / create / next / previous / delete buffer |
 | `:r` / `:R` / `:rr` / `-` | regenerate / start over / revert last user message / remove last message |

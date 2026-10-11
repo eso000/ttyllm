@@ -38,6 +38,36 @@ class TestConstruction(unittest.TestCase):
         self.assertEqual(sv.current_buffer_id, 0)
         self.assertFalse(sv.queue.has_scheduled)
 
+    def test_endpoint_argument_points_the_requester(self) -> None:
+        sv = Supervisor(endpoint="https://api.example.com:8443")
+        self.assertEqual(sv.requester.host, "api.example.com")
+        self.assertEqual(sv.requester.port, 8443)
+        self.assertTrue(sv.requester.tls)
+
+    def test_without_endpoint_the_default_is_used(self) -> None:
+        sv = Supervisor()
+        self.assertEqual(sv.requester.endpoint, "127.0.0.1:11434")
+
+    def test_insecure_argument_skips_tls_verification(self) -> None:
+        self.assertFalse(Supervisor(insecure=True).requester.tls_verify)
+        self.assertTrue(Supervisor().requester.tls_verify)
+
+    def test_set_endpoint_keeps_the_url_and_reloads_models(self) -> None:
+        sv = Supervisor()
+        with mock.patch.object(
+            Requester, "get_models", return_value=ModelList([Model("a")])
+        ):
+            sv.set_endpoint("https://local:99")
+        self.assertEqual(sv.requester.endpoint, "https://local:99")
+        self.assertTrue(sv.requester.tls)
+
+    def test_set_endpoint_without_arguments_only_shows_it(self) -> None:
+        sv = Supervisor()
+        with mock.patch.object(Requester, "get_models") as get_models:
+            sv.set_endpoint()
+        self.assertEqual(sv.ui.notification, "endpoint: 127.0.0.1:11434")
+        get_models.assert_not_called()
+
     def test_the_parts_are_wired_to_the_supervisor(self) -> None:
         sv = Supervisor()
         self.assertIs(sv.commands.sv, sv)
