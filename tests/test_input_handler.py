@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from unittest import mock
 
 from ai_chat import view as view_module
-from ai_chat.input_handler import InputHandler, Key
+from ai_chat.input_handler import KEY_LABELS, InputHandler, Key
 from ai_chat.models import Model, ModelList
 from test_input_keys import content, press
 from ai_chat.state import ViewMode
@@ -82,12 +82,17 @@ class TestHandleKey(HandlerTestCase):
         self.assertEqual(calls, ["b"])
         self.assertEqual(len(self.sv.buffers), 1)
 
+    def test_ctrl_h_shows_the_help_view(self) -> None:
+        self.handler.handle_key("\x08")
+        self.assertIs(self.sv.ui.mode, ViewMode.HELP)
+        self.assertEqual(self.sv.ui.scroll, 0)
+
     def test_printable_characters_are_typed(self) -> None:
         self.type("hi")
         self.assertEqual(content(self.sv), "hi")
 
     def test_unknown_control_characters_are_ignored(self) -> None:
-        self.type("\x01\x00\x08")
+        self.type("\x01\x00\x0c")
         self.assertEqual(content(self.sv), "")
         self.assertEqual(self.sv.ui.command, "")
 
@@ -324,6 +329,27 @@ class TestEscapeKey(unittest.TestCase):
         sv.current_buffer.updated = False
         press(b"\x1b\x1b", sv)
         self.assertFalse(sv.current_buffer.updated)
+
+class TestHelpText(HandlerTestCase):
+    def test_shortcuts_use_the_labels_and_action_descriptions(self) -> None:
+        text = self.handler.help_text()
+        self.assertIn("shortcuts", text)
+        self.assertIn("Ctrl+S:\tcreates new buffer from current", text)
+        self.assertIn("Ctrl+Q:\topen the command line, or close it again", text)
+        self.assertIn("Esc:\tscroll the view with the arrow keys", text)
+        self.assertIn("Enter:\tsubmit message or command, or leave a view", text)
+        self.assertIn("y / n:\tapprove / deny a tool call", text)
+
+    def test_every_binding_is_listed_with_a_description(self) -> None:
+        text = self.handler.help_text()
+        for code in self.handler.keys:
+            with self.subTest(key=KEY_LABELS[code]):
+                self.assertIn(f"{KEY_LABELS[code]}:\t", text)
+
+    def test_no_shortcut_is_left_undescribed(self) -> None:
+        for line in self.handler.help_text().splitlines()[2:]:
+            with self.subTest(line=line):
+                self.assertTrue(line.split(":\t", 1)[-1].strip())
 
 if __name__ == "__main__":
     unittest.main()

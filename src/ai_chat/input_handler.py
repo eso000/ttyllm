@@ -23,6 +23,7 @@ class Key(enum.IntEnum):
     CTRL_C = 3
     CTRL_D = 4
     CTRL_E = 5
+    CTRL_H = 8
     TAB = 9
     CTRL_N = 14
     CTRL_P = 16
@@ -32,6 +33,35 @@ class Key(enum.IntEnum):
     CTRL_U = 21
     ESCAPE = 27
     BACKSPACE = 127
+
+
+KEY_LABELS: dict[int, str] = {
+    Key.CTRL_S: "Ctrl+S",
+    Key.CTRL_B: "Ctrl+B",
+    Key.CTRL_D: "Ctrl+D",
+    Key.CTRL_N: "Ctrl+N",
+    Key.CTRL_P: "Ctrl+P",
+    Key.CTRL_R: "Ctrl+R",
+    Key.CTRL_E: "Ctrl+E",
+    Key.CTRL_H: "Ctrl+H",
+    Key.CTRL_Q: "Ctrl+Q",
+    Key.CTRL_U: "Ctrl+U",
+    Key.CTRL_C: "Ctrl+C",
+    Key.ESCAPE: "Esc",
+    Key.BACKSPACE: "Backspace",
+    Key.TAB: "Tab",
+}
+
+# labels whose own action docstring reads poorly as a help line
+KEY_NOTES: dict[str, str] = {
+    "Esc": "scroll the view with the arrow keys",
+}
+
+# keys the input handler reacts to that are not in the binding table
+BARE_KEYS: tuple[tuple[str, str], ...] = (
+    ("Enter", "submit message or command, or leave a view"),
+    ("y / n", "approve / deny a tool call"),
+)
 
 
 class InputHandler:
@@ -47,10 +77,11 @@ class InputHandler:
             Key.CTRL_P: supervisor.buffer_previous,
             Key.CTRL_R: supervisor.redo,
             Key.CTRL_E: supervisor.undo,
+            Key.CTRL_H: self.show_help,
             Key.CTRL_Q: self.toggle_command_line,
             Key.CTRL_U: self.clear_line,
-            Key.ESCAPE: self.escape,
             Key.CTRL_C: supervisor.handle_sigint,
+            Key.ESCAPE: self.escape,
             Key.BACKSPACE: self.backspace,
             Key.TAB: self.tab_complete,
         }
@@ -95,6 +126,10 @@ class InputHandler:
         """open the command line, or close it again"""
         self.sv.ui.command = "/" if self.sv.ui.command == "" else ""
         self.sv.view.draw_command_line()
+
+    def show_help(self) -> None:
+        """show the help page"""
+        self.sv.commands.set_view(ViewMode.HELP, 0)
 
     def clear_line(self) -> None:
         """clear the command line, or the message when there is no command"""
@@ -191,3 +226,13 @@ class InputHandler:
             ui.scroll_to_end()
         if sequence == "[C":
             ui.scroll_to_top()
+
+    def help_text(self) -> str:
+        """build the shortcut help from the key labels and bound action docstrings"""
+        lines = ["shortcuts  (up/down: scroll, enter: back to chat)", ""]
+        for code, action in self.keys.items():
+            label = KEY_LABELS[code]
+            lines.append(f"{label}:\t{KEY_NOTES.get(label) or action.__doc__ or ''}")
+        for label, description in BARE_KEYS:
+            lines.append(f"{label}:\t{description}")
+        return "\n".join(lines)

@@ -53,6 +53,14 @@ class TestCompose(ViewTestCase):
         self.assertIn("show chat", _text(box))
         self.assertTrue(hide)
 
+    def test_help_mode_also_shows_the_key_shortcuts(self) -> None:
+        self.ui.mode = ViewMode.HELP
+        box, hide = self.view.compose(self.buffer, -1)
+        text = _text(box)
+        self.assertIn("shortcuts", text)
+        self.assertIn("Ctrl+S", text)
+        self.assertTrue(hide)
+
     def test_models_mode_shows_the_model_list(self) -> None:
         self.ui.mode = ViewMode.MODELS
         box, hide = self.view.compose(self.buffer, -1)

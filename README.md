@@ -82,6 +82,7 @@ Type a message and press <kbd>Enter</kbd> to send. Start a line with `:` or
 | <kbd>Ctrl+R</kbd>      | regenerate last reply        |
 | <kbd>Ctrl+E</kbd>      | undo last user message       |
 | <kbd>Ctrl+Q</kbd>      | toggle command mode          |
+| <kbd>Ctrl+H</kbd>      | show help                    |
 | <kbd>Ctrl+U</kbd>      | clear input                  |
 | <kbd>Ctrl+C</kbd>      | interrupt request            |
 | <kbd>Tab</kbd>         | complete command / path      |
@@ -105,7 +106,7 @@ Run with `:h` (or see the table below) inside the app:
 | `:v ...` | show or set names and colors |
 | `:image <file>` / `:rmi` | attach / remove an image |
 | `:i <file>` / `:e <file>` | import / export chat (JSON) |
-| `:h` | help |
+| `:h` | help (commands and key bindings) |
 | `:q` | quit |
 
 ## Development

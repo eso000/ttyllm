@@ -98,7 +98,11 @@ class Commands:
 
     def help_text(self) -> str:
         """build the help screen from the command descriptions"""
-        lines = ["commands  (up/down: scroll, enter: back to chat)", ""]
+        lines = [
+            "commands  (up/down: scroll, enter: back to chat)",
+            "",
+            "q:\tquit",  # handled by the input handler, not a table command
+        ]
         for name, command in self.table.items():
             lines.append(f"{name}:\t{command.description}")
         return "\n".join(lines)

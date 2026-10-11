@@ -41,7 +41,11 @@ class View:
             case ViewMode.DATA:
                 return buffer.get_text_box_data(width, scroll), True
             case ViewMode.HELP:
-                return make_text_box(self.sv.commands.help_text(), width, scroll), True
+                help_text = (
+                    f"{self.sv.commands.help_text()}\n\n"
+                    f"{self.sv.keyboard.help_text()}"
+                )
+                return make_text_box(help_text, width, scroll), True
             case ViewMode.MODELS:
                 return make_text_box(self.sv.models.short, width, scroll), True
 
