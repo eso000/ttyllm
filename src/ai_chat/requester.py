@@ -455,8 +455,8 @@ class Requester:
                             continue
                     try:
                         size = int(body[0], 16)
-                    except (ValueError, IndexError):
-                        raise ValueError(f"invalid chunk size frame: {body[:1]!r}")
+                    except (ValueError, IndexError) as exc:
+                        raise ValueError(f"invalid chunk size frame: {body[:1]!r}") from exc
                     if len(body) < 2:
                         raise ValueError("incomplete ndjson frame")
                     if size != len(body[1].encode()) + 1:
@@ -489,8 +489,8 @@ class Requester:
                             continue
                     try:
                         size = int(body[0], 16)
-                    except (ValueError, IndexError):
-                        raise ValueError(f"invalid chunk size frame: {body[:1]!r}")
+                    except (ValueError, IndexError) as exc:
+                        raise ValueError(f"invalid chunk size frame: {body[:1]!r}") from exc
 
                     if len(body) >= 2 and size != len(body[1].encode()):
                         if len(body) >= 3:
