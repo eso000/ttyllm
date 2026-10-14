@@ -18,20 +18,13 @@ class Parameter:
         return {"type": self.type, "description": self.description}
 
 
+@dataclasses.dataclass
 class Tool:
     """a callable exposed to the model, with schema metadata"""
-    def __init__(
-        self,
-        name: str,
-        function: Callable[..., Any],
-        description: str,
-        parameters: list[Parameter],
-    ) -> None:
-        """store the name, implementation, description and parameters"""
-        self.name = name
-        self.function = function
-        self.description = description
-        self.parameters = parameters
+    name: str
+    function: Callable[..., Any]
+    description: str
+    parameters: list[Parameter]
 
     @property
     def dict(self) -> dict[str, Any]:
