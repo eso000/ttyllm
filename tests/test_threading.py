@@ -1,3 +1,5 @@
+"""Tests for the request queue, worker threads and cancellation."""
+
 import os
 import sys
 import threading
@@ -16,7 +18,9 @@ from ai_chat.supervisor import Supervisor
 from test_requester import _http_response, _serve_once
 
 class TestRenderThread(unittest.TestCase):
+    """Tests for render thread."""
     def test_survives_rapid_buffer_switching(self) -> None:
+        """Survives rapid buffer switching."""
         sv = Supervisor()
         sv.buffers.append(Buffer())
         sv.run = True
@@ -47,12 +51,14 @@ class TestRenderThread(unittest.TestCase):
         self.assertFalse(render.is_alive())
 
     def test_scroll_during_render_is_not_overwritten(self) -> None:
+        """Scroll during render is not overwritten."""
         sv = Supervisor()
         sv.run = True
         sv.ui.scroll = 0
         sv.current_buffer.updated = False  # a new buffer starts out as updated
 
         def scrolling_draw(*args: Any, **kwargs: Any) -> tuple[int, int]:
+            """Test helper: scrolling draw."""
             sv.ui.scroll = 7  # user scrolls while the screen is drawn
             return (10, 3)
 
@@ -71,7 +77,9 @@ class TestRenderThread(unittest.TestCase):
         self.assertEqual(sv.ui.scroll, 7)
 
 class TestCancel(unittest.TestCase):
+    """Tests for cancel."""
     def test_idle_cancel_leaves_nothing_behind(self) -> None:
+        """Idle cancel leaves nothing behind."""
         chat = Buffer()
         for _ in range(5):
             chat.cancel_request()
@@ -80,6 +88,7 @@ class TestCancel(unittest.TestCase):
             os.read(chat.pipe[0], 1)
 
     def test_cancel_during_request_is_recorded_and_cleared(self) -> None:
+        """Cancel during request is recorded and cleared."""
         chat = Buffer()
         chat.in_request = True
         for _ in range(3):
@@ -91,6 +100,7 @@ class TestCancel(unittest.TestCase):
             os.read(chat.pipe[0], 1)
 
     def test_next_request_is_not_aborted_by_old_cancels(self) -> None:
+        """Next request is not aborted by old cancels."""
         body = {
             "message": {"content": "hi"},
             "done": True,
@@ -107,6 +117,7 @@ class TestCancel(unittest.TestCase):
         self.assertEqual(chat.chat_data["messages"][-2]["content"], "hi")
 
     def test_request_has_no_startup_delay(self) -> None:
+        """Request has no startup delay."""
         body = {
             "message": {"content": "hi"},
             "done": True,
@@ -119,6 +130,7 @@ class TestCancel(unittest.TestCase):
         self.assertLess(time.time() - started, 0.4)
 
     def test_pipe_is_closed_with_the_buffer(self) -> None:
+        """Pipe is closed with the buffer."""
         chat = Buffer()
         read_fd, write_fd = chat.pipe
         chat.__del__()
@@ -128,7 +140,9 @@ class TestCancel(unittest.TestCase):
         chat.pipe = ()  # type: ignore[assignment]
 
 class TestRequestQueue(unittest.TestCase):
+    """Tests for request queue."""
     def test_concurrent_schedule_enqueues_once(self) -> None:
+        """Concurrent schedule enqueues once."""
         old_interval = sys.getswitchinterval()
         sys.setswitchinterval(1e-6)
         self.addCleanup(sys.setswitchinterval, old_interval)
@@ -138,6 +152,7 @@ class TestRequestQueue(unittest.TestCase):
             barrier = threading.Barrier(8)
 
             def schedule() -> None:
+                """Test helper: schedule."""
                 barrier.wait()
                 queue.schedule(chat)
 
@@ -149,7 +164,9 @@ class TestRequestQueue(unittest.TestCase):
             self.assertEqual(len(queue.qu), 1)
 
 class TestInput(unittest.TestCase):
+    """Tests for input."""
     def _feed(self, sv: Supervisor, data: bytes) -> threading.Thread:
+        """Test helper: feed."""
         read_fd, write_fd = os.pipe()
         os.write(write_fd, data)
         os.close(write_fd)
@@ -163,6 +180,7 @@ class TestInput(unittest.TestCase):
         return thread
 
     def test_multibyte_character_is_typed_not_fatal(self) -> None:
+        """Multibyte character is typed not fatal."""
         sv = Supervisor()
         sv.run = True
         thread = self._feed(sv, "ä".encode())
@@ -170,6 +188,7 @@ class TestInput(unittest.TestCase):
         self.assertEqual(sv.current_data["messages"][-1]["content"], "ä")
 
     def test_closed_stdin_stops_the_app(self) -> None:
+        """Closed stdin stops the app."""
         sv = Supervisor()
         sv.run = True
         thread = self._feed(sv, b"")
@@ -177,7 +196,9 @@ class TestInput(unittest.TestCase):
         self.assertFalse(sv.run)
 
 class TestInputUIState(unittest.TestCase):
+    """Tests for input ui state."""
     def _run(self, data: bytes, **state: Any) -> Supervisor:
+        """Test helper: run."""
         sv = Supervisor()
         sv.run = True
         for name, value in state.items():
@@ -187,38 +208,47 @@ class TestInputUIState(unittest.TestCase):
         return sv
 
     def test_up_arrow_scrolls_from_the_end(self) -> None:
+        """Up arrow scrolls from the end."""
         sv = self._run(b"\x1b[A", scroll=-1, scroll_max=30)
         self.assertEqual(sv.ui.scroll, 29)
 
     def test_down_arrow_follows_the_end_again(self) -> None:
+        """Down arrow follows the end again."""
         sv = self._run(b"\x1b[B", scroll=30, scroll_max=30)
         self.assertEqual(sv.ui.scroll, -1)
 
     def test_left_and_right_arrows_jump(self) -> None:
+        """Left and right arrows jump."""
         self.assertEqual(self._run(b"\x1b[C", scroll=7).ui.scroll, 1)
         self.assertEqual(self._run(b"\x1b[D", scroll=7).ui.scroll, -1)
 
     def test_typing_a_colon_starts_a_command(self) -> None:
+        """Typing a colon starts a command."""
         sv = self._run(b":sm x")
         self.assertEqual(sv.ui.command, ":sm x")
 
     def test_a_key_dismisses_the_notification_and_is_not_typed(self) -> None:
+        """A key dismisses the notification and is not typed."""
         sv = self._run(b"a", notification="cannot reach server")
         self.assertEqual(sv.ui.notification, "")
         self.assertEqual(sv.current_data["messages"][-1]["content"], "")
 
     def test_typing_returns_to_the_chat(self) -> None:
+        """Typing returns to the chat."""
         sv = self._run(b"a", mode=ViewMode.HELP, scroll=4)
         self.assertIs(sv.ui.mode, ViewMode.NORMAL)
         self.assertEqual(sv.ui.scroll, -1)
 
     def test_enter_leaves_another_view(self) -> None:
+        """Enter leaves another view."""
         sv = self._run(b"\r", mode=ViewMode.MODELS, scroll=4)
         self.assertIs(sv.ui.mode, ViewMode.NORMAL)
         self.assertEqual(sv.ui.scroll, -1)
 
 class TestWatcher(unittest.TestCase):
+    """Tests for watcher."""
     def test_command_is_taken_atomically_and_cleared(self) -> None:
+        """Command is taken atomically and cleared."""
         sv = Supervisor()
         sv.run = True
         seen = []
@@ -238,12 +268,15 @@ class TestWatcher(unittest.TestCase):
         self.assertEqual(sv.ui.command, "")
 
 class TestGuardedThreads(unittest.TestCase):
+    """Tests for guarded threads."""
     def test_failing_worker_is_reported_and_restarted(self) -> None:
+        """Failing worker is reported and restarted."""
         sv = Supervisor()
         sv.run = True
         calls = []
 
         def flaky() -> None:
+            """Test helper: flaky."""
             calls.append(1)
             if len(calls) == 1:
                 raise RuntimeError("boom")
