@@ -82,8 +82,8 @@ class Supervisor:
             self.queue.schedule(buffer)
 
     def handle_sigwinch(
-        self, signum: int, frame: types.FrameType | None
-    ) -> None:  # pylint: disable=unused-argument
+        self, _signum: int, _frame: types.FrameType | None
+    ) -> None:
         """re-read the terminal size and redraw after a resize"""
         self.ui.resize()
         clean_screen()
