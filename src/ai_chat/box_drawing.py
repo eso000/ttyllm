@@ -14,7 +14,8 @@ class TextBox:
 
 
 def text_to_lines(text: str, width: int, color: str = "") -> list[str]:
-    """wrap text into lines of at most width characters, breaking at spaces, each prefixed with color"""
+    """wrap text into lines of at most width characters, breaking at spaces,
+    each prefixed with color"""
     if text == "" or width <= 0:
         return [""]
     res: list[str] = []
