@@ -1,3 +1,5 @@
+"""Raw-socket HTTP client for the Ollama and OpenAI-compatible chat APIs."""
+
 import socket
 import os
 import re

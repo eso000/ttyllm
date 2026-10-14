@@ -1,3 +1,5 @@
+"""Turns keystrokes into line edits, scrolling, command mode and tool approvals."""
+
 import codecs
 import enum
 import os

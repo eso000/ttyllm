@@ -1,3 +1,5 @@
+"""Owns the buffers, threads and terminal, and drives the whole chat."""
+
 import json
 import threading
 import time

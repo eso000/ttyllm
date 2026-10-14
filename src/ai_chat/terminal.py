@@ -1,3 +1,5 @@
+"""Raw input mode and alternate-screen handling for the terminal."""
+
 import contextlib
 import sys
 import termios

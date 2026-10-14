@@ -1,3 +1,5 @@
+"""The model list returned by the server and how it is displayed."""
+
 import dataclasses
 from collections.abc import Iterator
 from typing import Any
@@ -47,9 +49,11 @@ class ModelList:
         return cls([])
 
     def __iter__(self) -> Iterator[Model]:
+        """iterate over the models in the order the server listed them"""
         return iter(self._models)
 
     def __len__(self) -> int:
+        """the number of models"""
         return len(self._models)
 
     @property

@@ -1,3 +1,5 @@
+"""Tab completion for command names, model names and file paths."""
+
 import os
 from collections.abc import Sequence
 from glob import glob

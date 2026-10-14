@@ -1,3 +1,5 @@
+"""One chat: its message history, sampling options, looks and pending tool calls."""
+
 import re
 import os
 import json

@@ -1,3 +1,5 @@
+"""Serialises reply requests so one buffer is generated at a time."""
+
 import threading
 
 from .buffer import Buffer

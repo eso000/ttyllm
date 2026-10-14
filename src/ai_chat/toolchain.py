@@ -1,3 +1,5 @@
+"""The built-in tools and the registry the model can call."""
+
 import subprocess
 
 from .tool import Tool, Parameter

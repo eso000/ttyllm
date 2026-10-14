@@ -1,3 +1,5 @@
+"""Text box layout, word wrapping and the ANSI primitives used to draw them."""
+
 import dataclasses
 import threading
 

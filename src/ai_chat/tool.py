@@ -1,3 +1,5 @@
+"""Tool and parameter definitions sent to the model for tool calling."""
+
 import dataclasses
 from typing import Any, Callable
 

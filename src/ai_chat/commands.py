@@ -1,3 +1,5 @@
+"""The slash and colon commands, their help text and the command table."""
+
 import base64
 import dataclasses
 import inspect

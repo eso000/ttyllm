@@ -1,3 +1,5 @@
+"""UIState: the view mode, scroll position, command line and notification."""
+
 import dataclasses
 import shutil
 import threading

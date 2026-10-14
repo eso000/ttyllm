@@ -1,3 +1,5 @@
+"""Renders the current buffer for the current UIState; never mutates state."""
+
 from typing import TYPE_CHECKING
 
 from .box_drawing import TextBox, fit_text_to_box, fit_to_box, make_text_box
