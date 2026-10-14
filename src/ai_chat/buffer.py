@@ -12,7 +12,6 @@ from . import toolchain
 
 class ColorCodeException(Exception):
     """raised when a color value does not match any supported format"""
-    pass
 
 
 class Buffer:  # pylint: disable=R0902, R0904

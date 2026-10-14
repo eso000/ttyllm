@@ -15,7 +15,9 @@ def read_file(file_path: str) -> str:
 
 def execute_shell_command(command: str) -> str:
     """run a shell command and return its stdout"""
-    return subprocess.run([command], shell=True, capture_output=True, text=True).stdout
+    return subprocess.run(
+        [command], shell=True, capture_output=True, text=True, check=False
+    ).stdout
 
 
 toolchain.append(
