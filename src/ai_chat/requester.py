@@ -120,9 +120,7 @@ class Requester:
     def _auth_headers(self) -> list[str]:
         """the bearer Authorization header for the API key, or nothing when unavailable"""
         key = self.api_key.get_key() if self.api_key is not None else None
-        if key is None:
-            return []
-        return [f"Authorization: Bearer {key}"]
+        return [f"Authorization: Bearer {key}"] if key is not None else []
 
     def make_post(self, d: dict[str, Any]) -> str:
         """assemble a raw HTTP/1.1 POST request with a JSON body"""

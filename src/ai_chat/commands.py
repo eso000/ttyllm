@@ -10,7 +10,7 @@ from .buffer import Buffer, ColorCodeException
 from .state import ViewMode
 
 if TYPE_CHECKING:
-    from supervisor import Supervisor
+    from .supervisor import Supervisor
 
 
 @dataclasses.dataclass(frozen=True)

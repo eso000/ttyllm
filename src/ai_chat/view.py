@@ -5,7 +5,7 @@ from .buffer import Buffer
 from .state import UIState, ViewMode
 
 if TYPE_CHECKING:
-    from supervisor import Supervisor
+    from .supervisor import Supervisor
 
 STATUS_COLOR = "\033[32m"
 STATUS_BACKGROUND = "\033[0m"

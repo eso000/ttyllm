@@ -5,6 +5,7 @@ from .buffer import Buffer
 
 class RequestQueue:
     """serialises reply requests, one buffer at a time"""
+
     def __init__(self) -> None:
         """create an empty queue"""
         self.cond: threading.Condition = threading.Condition()

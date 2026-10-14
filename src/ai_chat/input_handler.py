@@ -10,7 +10,7 @@ from .completion import complete
 from .state import ViewMode
 
 if TYPE_CHECKING:
-    from supervisor import Supervisor
+    from .supervisor import Supervisor
 
 ENTER_KEYS = ("\r", "\n")
 ESCAPE_SEQUENCE_END = ("A", "B", "C", "D", "~")
