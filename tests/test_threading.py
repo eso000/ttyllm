@@ -17,8 +17,10 @@ from ai_chat.state import ViewMode
 from ai_chat.supervisor import Supervisor
 from test_requester import _http_response, _serve_once
 
+
 class TestRenderThread(unittest.TestCase):
     """Tests for render thread."""
+
     def test_survives_rapid_buffer_switching(self) -> None:
         """Survives rapid buffer switching."""
         sv = Supervisor()
@@ -30,9 +32,10 @@ class TestRenderThread(unittest.TestCase):
         threading.excepthook = lambda args: errors.append(args.exc_value)
         sys.setswitchinterval(1e-6)
         try:
-            with mock.patch.object(
-                view_module, "fit_to_box", lambda *a, **k: (10, -1)
-            ), mock.patch.object(view_module, "fit_text_to_box"):
+            with (
+                mock.patch.object(view_module, "fit_to_box", lambda *a, **k: (10, -1)),
+                mock.patch.object(view_module, "fit_text_to_box"),
+            ):
                 render = threading.Thread(target=sv.update_buffer)
                 render.start()
                 deadline = time.time() + 1
@@ -62,9 +65,10 @@ class TestRenderThread(unittest.TestCase):
             sv.ui.scroll = 7  # user scrolls while the screen is drawn
             return (10, 3)
 
-        with mock.patch.object(
-            view_module, "fit_to_box", scrolling_draw
-        ), mock.patch.object(view_module, "fit_text_to_box"):
+        with (
+            mock.patch.object(view_module, "fit_to_box", scrolling_draw),
+            mock.patch.object(view_module, "fit_text_to_box"),
+        ):
             render = threading.Thread(target=sv.update_buffer)
             render.start()
             sv.current_buffer.notify()
@@ -76,8 +80,10 @@ class TestRenderThread(unittest.TestCase):
         self.assertEqual(sv.ui.scroll_max, 10)
         self.assertEqual(sv.ui.scroll, 7)
 
+
 class TestCancel(unittest.TestCase):
     """Tests for cancel."""
+
     def test_idle_cancel_leaves_nothing_behind(self) -> None:
         """Idle cancel leaves nothing behind."""
         chat = Buffer()
@@ -139,8 +145,10 @@ class TestCancel(unittest.TestCase):
                 os.fstat(fd)
         chat.pipe = ()  # type: ignore[assignment]
 
+
 class TestRequestQueue(unittest.TestCase):
     """Tests for request queue."""
+
     def test_concurrent_schedule_enqueues_once(self) -> None:
         """Concurrent schedule enqueues once."""
         old_interval = sys.getswitchinterval()
@@ -163,8 +171,10 @@ class TestRequestQueue(unittest.TestCase):
                 thread.join()
             self.assertEqual(len(queue.qu), 1)
 
+
 class TestInput(unittest.TestCase):
     """Tests for input."""
+
     def _feed(self, sv: Supervisor, data: bytes) -> threading.Thread:
         """Test helper: feed."""
         read_fd, write_fd = os.pipe()
@@ -195,8 +205,10 @@ class TestInput(unittest.TestCase):
         self.assertFalse(thread.is_alive())
         self.assertFalse(sv.run)
 
+
 class TestInputUIState(unittest.TestCase):
     """Tests for input ui state."""
+
     def _run(self, data: bytes, **state: Any) -> Supervisor:
         """Test helper: run."""
         sv = Supervisor()
@@ -245,8 +257,10 @@ class TestInputUIState(unittest.TestCase):
         self.assertIs(sv.ui.mode, ViewMode.NORMAL)
         self.assertEqual(sv.ui.scroll, -1)
 
+
 class TestWatcher(unittest.TestCase):
     """Tests for watcher."""
+
     def test_command_is_taken_atomically_and_cleared(self) -> None:
         """Command is taken atomically and cleared."""
         sv = Supervisor()
@@ -267,8 +281,10 @@ class TestWatcher(unittest.TestCase):
         self.assertEqual(seen, ["/n"])
         self.assertEqual(sv.ui.command, "")
 
+
 class TestGuardedThreads(unittest.TestCase):
     """Tests for guarded threads."""
+
     def test_failing_worker_is_reported_and_restarted(self) -> None:
         """Failing worker is reported and restarted."""
         sv = Supervisor()
@@ -285,6 +301,7 @@ class TestGuardedThreads(unittest.TestCase):
             sv._guarded("worker", flaky)()
         self.assertEqual(len(calls), 2)
         self.assertIn("boom", sv.ui.notification)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -18,6 +18,7 @@ CTRL_N, CTRL_P, CTRL_Q, CTRL_R = b"\x0e", b"\x10", b"\x11", b"\x12"
 CTRL_S, CTRL_U, TAB, BACKSPACE = b"\x13", b"\x15", b"\t", b"\x7f"
 UP, DOWN, RIGHT, LEFT = b"\x1b[A", b"\x1b[B", b"\x1b[C", b"\x1b[D"
 
+
 def press(data: bytes, sv: Supervisor | None = None, **state: Any) -> Supervisor:
     """feed raw bytes through the input thread until stdin closes"""
     sv = sv or Supervisor()
@@ -29,8 +30,9 @@ def press(data: bytes, sv: Supervisor | None = None, **state: Any) -> Supervisor
     os.close(write_fd)
     stdin = mock.Mock()
     stdin.fileno.return_value = read_fd
-    with mock.patch.object(sys, "stdin", stdin), mock.patch.object(
-        view_module, "fit_text_to_box"
+    with (
+        mock.patch.object(sys, "stdin", stdin),
+        mock.patch.object(view_module, "fit_text_to_box"),
     ):
         thread = threading.Thread(target=sv.keyboard.run)
         thread.start()
@@ -39,16 +41,20 @@ def press(data: bytes, sv: Supervisor | None = None, **state: Any) -> Supervisor
     assert not thread.is_alive(), "input thread did not finish"
     return sv
 
+
 def content(sv: Supervisor) -> str:
     """Test helper: content."""
     return str(sv.current_data["messages"][-1]["content"])
+
 
 def pending_call() -> dict[str, Any]:
     """Test helper: pending call."""
     return {"id": "1", "name": "tool", "args": {}, "approved": None, "result": None}
 
+
 class TestBufferKeys(unittest.TestCase):
     """Tests for buffer keys."""
+
     def test_ctrl_b_creates_a_buffer(self) -> None:
         """Ctrl b creates a buffer."""
         sv = press(CTRL_B)
@@ -102,8 +108,10 @@ class TestBufferKeys(unittest.TestCase):
         self.assertEqual(sv.ui.command, "")
         self.assertEqual(len(sv.buffers), 1)
 
+
 class TestCommandLine(unittest.TestCase):
     """Tests for command line."""
+
     def test_ctrl_q_toggles_command_mode(self) -> None:
         """Ctrl q toggles command mode."""
         self.assertEqual(press(CTRL_Q).ui.command, "/")
@@ -152,8 +160,10 @@ class TestCommandLine(unittest.TestCase):
         self.assertIs(sv.ui.mode, ViewMode.NORMAL)
         self.assertEqual(sv.ui.scroll, -1)
 
+
 class TestTyping(unittest.TestCase):
     """Tests for typing."""
+
     def test_text_goes_into_the_message(self) -> None:
         """Text goes into the message."""
         sv = press(b"hi there")
@@ -174,8 +184,10 @@ class TestTyping(unittest.TestCase):
         self.assertIs(sv.ui.mode, ViewMode.NORMAL)
         self.assertEqual(sv.ui.scroll, -1)
 
+
 class TestEnter(unittest.TestCase):
     """Tests for enter."""
+
     def test_enter_submits_a_message(self) -> None:
         """Enter submits a message."""
         sv = press(b"hi\r")
@@ -207,8 +219,10 @@ class TestEnter(unittest.TestCase):
         self.assertEqual(sv.ui.scroll, -1)
         self.assertFalse(sv.ui.submitted)
 
+
 class TestToolApproval(unittest.TestCase):
     """Tests for tool approval."""
+
     def _press(self, data: bytes, **state: Any) -> tuple[Supervisor, dict[str, Any]]:
         """Test helper: press."""
         call = pending_call()
@@ -242,8 +256,10 @@ class TestToolApproval(unittest.TestCase):
         """Y without a pending call is text."""
         self.assertEqual(content(press(b"yes")), "yes")
 
+
 class TestNotification(unittest.TestCase):
     """Tests for notification."""
+
     def test_the_first_key_only_dismisses_it(self) -> None:
         """The first key only dismisses it."""
         sv = press(b"ab", notification="cannot reach server")
@@ -255,8 +271,10 @@ class TestNotification(unittest.TestCase):
         sv = press(CTRL_B, notification="boom")
         self.assertEqual(len(sv.buffers), 1)
 
+
 class TestEscapeSequences(unittest.TestCase):
     """Tests for escape sequences."""
+
     def test_arrows_scroll(self) -> None:
         """Arrows scroll."""
         self.assertEqual(press(UP, scroll_max=30).ui.scroll, 29)
@@ -291,8 +309,10 @@ class TestEscapeSequences(unittest.TestCase):
         """Escape followed by escape is dropped."""
         self.assertEqual(content(press(b"\x1b\x1bx")), "x")
 
+
 class TestTabCompletion(unittest.TestCase):
     """Tests for tab completion."""
+
     MODELS = ["llama3.2", "llama3.1", "mistral"]
 
     def _complete(self, command: str) -> str:
@@ -350,6 +370,7 @@ class TestTabCompletion(unittest.TestCase):
                 self._complete(f":i {folder}/be"), f":i {folder}/beta.json"
             )
             self.assertEqual(self._complete(f":i {folder}/su"), f":i {folder}/sub/")
+
 
 if __name__ == "__main__":
     unittest.main()

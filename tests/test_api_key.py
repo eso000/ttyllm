@@ -22,6 +22,7 @@ def _without_env(name: str):
 
 class TestRawKey(unittest.TestCase):
     """Tests for raw key."""
+
     def test_raw_key_is_returned(self) -> None:
         """Raw key is returned."""
         self.assertEqual(ApiKey("sk-123", ApiKeyType.RAW).get_key(), "sk-123")
@@ -45,6 +46,7 @@ class TestRawKey(unittest.TestCase):
 
 class TestEnvKey(unittest.TestCase):
     """Tests for env key."""
+
     def test_env_var_is_returned(self) -> None:
         """Env var is returned."""
         with mock.patch.dict(os.environ, {"AI_CHAT_TEST_KEY": "sk-abc"}):
@@ -72,11 +74,10 @@ class TestEnvKey(unittest.TestCase):
 
 class TestFileKey(unittest.TestCase):
     """Tests for file key."""
+
     def write_file(self, content: str) -> str:
         """write a key file in a temp dir and return its path"""
-        handle = tempfile.NamedTemporaryFile(
-            "w", delete=False, encoding="utf-8"
-        )
+        handle = tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8")
         handle.write(content)
         handle.close()
         self.addCleanup(os.unlink, handle.name)

@@ -9,6 +9,7 @@ _print_lock = threading.Lock()
 @dataclasses.dataclass
 class TextBox:
     """a block of wrapped lines together with a scroll offset"""
+
     lines: list[str] = dataclasses.field(default_factory=list)
     last: int = -1
 

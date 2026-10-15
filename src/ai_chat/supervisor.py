@@ -23,6 +23,7 @@ from .api_key import ApiKey
 
 class Supervisor:
     """owns the buffers, threads and terminal, and drives the whole chat"""
+
     def __init__(
         self,
         open_api: bool = False,
@@ -30,7 +31,6 @@ class Supervisor:
         insecure: bool = False,
         api_key: ApiKey | None = None,
     ) -> None:
-
         """set up buffers, commands and request queue, run_chat loads the models"""
         self.open_api: bool = open_api
 
@@ -81,9 +81,7 @@ class Supervisor:
         if buffer.decide(approved):
             self.queue.schedule(buffer)
 
-    def handle_sigwinch(
-        self, _signum: int, _frame: types.FrameType | None
-    ) -> None:
+    def handle_sigwinch(self, _signum: int, _frame: types.FrameType | None) -> None:
         """re-read the terminal size and redraw after a resize"""
         self.ui.resize()
         clean_screen()
@@ -322,6 +320,7 @@ class Supervisor:
 
     def _guarded(self, name: str, target: Callable[[], None]) -> Callable[[], None]:
         """wrap a thread target so an error notifies instead of killing the thread"""
+
         def run() -> None:
             """call the target, restarting it after errors until the chat stops"""
             while self.run:

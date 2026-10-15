@@ -11,8 +11,10 @@ from unittest import mock
 
 from ai_chat.terminal import raw_terminal
 
+
 class TestRawTerminal(unittest.TestCase):
     """Tests for raw terminal."""
+
     def setUp(self) -> None:
         """Set up the fixtures for each test."""
         master, slave = pty.openpty()
@@ -70,6 +72,7 @@ class TestRawTerminal(unittest.TestCase):
                 with raw_terminal():
                     pass
         self.assertEqual(out.getvalue(), "")
+
 
 if __name__ == "__main__":
     unittest.main()

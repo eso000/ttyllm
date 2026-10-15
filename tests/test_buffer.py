@@ -7,8 +7,10 @@ from ai_chat.buffer import Buffer
 
 DEFAULT_MODEL = "llama3.2"
 
+
 class TestSetData(unittest.TestCase):
     """Tests for set data."""
+
     def _import(self, chat: dict[str, Any]) -> Buffer:
         """Test helper: import."""
         buffer = Buffer()
@@ -100,6 +102,7 @@ class TestSetData(unittest.TestCase):
             {"model": "m", "messages": [{"role": "user", "content": "hi"}]}
         )
         self.assertEqual(buffer.chat_data["model"], "m")
+
 
 if __name__ == "__main__":
     unittest.main()

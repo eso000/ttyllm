@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 @dataclasses.dataclass(frozen=True)
 class Command:
     """a colon command, its one line description, arguments and extra detail"""
+
     handler: Callable[..., None]
     description: str
     takes_args: bool = False
@@ -38,6 +39,7 @@ def _rest_lines(doc: str | None) -> str | None:
 
 class Commands:
     """the colon commands of the chat, buffer commands are the supervisor's own methods"""
+
     def __init__(self, supervisor: "Supervisor") -> None:
         """build the command table for the given supervisor"""
         self.sv: "Supervisor" = supervisor

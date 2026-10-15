@@ -14,16 +14,20 @@ from ai_chat.requester import Requester
 from ai_chat.state import ViewMode
 from ai_chat.supervisor import Supervisor
 
+
 class CommandsTestCase(unittest.TestCase):
     """Shared test case for commands."""
+
     def setUp(self) -> None:
         """Set up the fixtures for each test."""
         self.sv = Supervisor()
         self.commands = self.sv.commands
         self.sv.buffers[0].add_msg("system")
 
+
 class TestExecute(CommandsTestCase):
     """Tests for execute."""
+
     def test_quit_returns_false(self) -> None:
         """Quit returns false."""
         self.assertFalse(self.commands.execute(":q"))
@@ -49,8 +53,10 @@ class TestExecute(CommandsTestCase):
                     sv = Supervisor()
                     self.assertTrue(sv.commands.execute(f":{name} unexpected extra"))
 
+
 class TestCommandTable(CommandsTestCase):
     """Tests for command table."""
+
     def test_buffer_commands_are_the_supervisors_own_methods(self) -> None:
         """Buffer commands are the supervisors own methods."""
         for name, method in (
@@ -103,8 +109,10 @@ class TestCommandTable(CommandsTestCase):
             with self.subTest(command=name):
                 self.assertTrue(entry.description.strip())
 
+
 class TestViews(CommandsTestCase):
     """Tests for views."""
+
     def test_each_view_command_selects_its_state(self) -> None:
         """Each view command selects its state."""
         for name, state in (
@@ -154,8 +162,10 @@ class TestViews(CommandsTestCase):
         self.assertTrue(free, "set_view took the buffer lock before the ui lock")
         self.assertFalse(thread.is_alive())
 
+
 class TestRoles(CommandsTestCase):
     """Tests for roles."""
+
     def test_role_commands_change_the_current_message(self) -> None:
         """Role commands change the current message."""
         for name, role in (("ai", "assistant"), ("us", "user"), ("sys", "system")):
@@ -163,8 +173,10 @@ class TestRoles(CommandsTestCase):
                 self.commands.execute(f":{name}")
                 self.assertEqual(self.sv.current_data["messages"][-1]["role"], role)
 
+
 class TestBuffers(CommandsTestCase):
     """Tests for buffers."""
+
     def test_create_and_navigate(self) -> None:
         """Create and navigate."""
         self.commands.execute(":bc")
@@ -226,8 +238,10 @@ class TestBuffers(CommandsTestCase):
         self.commands.execute(":r")
         self.assertTrue(self.sv.queue.has_scheduled)
 
+
 class TestModelCommands(CommandsTestCase):
     """Tests for model commands."""
+
     def test_switch_model(self) -> None:
         """Switch model."""
         self.commands.execute(":sm llama3.2")
@@ -253,8 +267,10 @@ class TestModelCommands(CommandsTestCase):
             self.commands.execute(":mr")
         self.assertEqual(self.sv.ui.notification, "loaded 2 models")
 
+
 class TestEndpoint(CommandsTestCase):
     """Tests for endpoint."""
+
     def _with_models(self):
         """Test helper: with models."""
         return mock.patch.object(Requester, "get_models", return_value=[Model("a")])
@@ -325,8 +341,10 @@ class TestEndpoint(CommandsTestCase):
         self.commands.execute(":endp a b c")
         self.assertIn("usage", self.sv.ui.notification)
 
+
 class TestOptions(CommandsTestCase):
     """Tests for options."""
+
     def test_set_stream(self) -> None:
         """Set stream."""
         self.commands.execute(":o stream 0")
@@ -341,7 +359,13 @@ class TestOptions(CommandsTestCase):
 
     def test_invalid_value_is_reported_and_nothing_changes(self) -> None:
         """Invalid value is reported and nothing changes."""
-        for command in (":o k abc", ":o p abc", ":o t abc", ":o pen abc", ":o stream abc"):
+        for command in (
+            ":o k abc",
+            ":o p abc",
+            ":o t abc",
+            ":o pen abc",
+            ":o stream abc",
+        ):
             with self.subTest(command=command):
                 before = dict(self.sv.current_buffer.options)
                 self.commands.execute(command)
@@ -363,8 +387,10 @@ class TestOptions(CommandsTestCase):
         self.commands.execute(":o")
         self.assertIn("top_k", self.sv.ui.notification)
 
+
 class TestVisual(CommandsTestCase):
     """Tests for visual."""
+
     def test_set_names(self) -> None:
         """Set names."""
         self.commands.execute(":v un me")
@@ -380,8 +406,10 @@ class TestVisual(CommandsTestCase):
         self.commands.execute(":v zz 1")
         self.assertIn("zz", self.sv.ui.notification)
 
+
 class TestFiles(CommandsTestCase):
     """Tests for files."""
+
     def test_export_then_import_round_trips(self) -> None:
         """Export then import round trips."""
         self.sv.current_data["model"] = "roundtrip"
@@ -412,8 +440,10 @@ class TestFiles(CommandsTestCase):
         self.commands.execute(":e /does/not/exist/chat.json")
         self.assertIn("not found", self.sv.ui.notification)
 
+
 class TestImages(CommandsTestCase):
     """Tests for images."""
+
     def _user_message(self) -> None:
         """Test helper: user message."""
         self.sv.current_buffer.change_msg("user")
@@ -443,8 +473,10 @@ class TestImages(CommandsTestCase):
         self.commands.execute(":image /does/not/exist.png")
         self.assertIn("not found", self.sv.ui.notification)
 
+
 class TestHelpText(CommandsTestCase):
     """Tests for help text."""
+
     def test_merged_commands_keep_distinct_descriptions(self) -> None:
         """Merged commands keep distinct descriptions."""
         text = self.commands.help_text()
@@ -482,6 +514,7 @@ class TestHelpText(CommandsTestCase):
 
 class TestDocstringSplit(unittest.TestCase):
     """Tests for docstring split."""
+
     def test_the_first_line_becomes_the_description(self) -> None:
         """The first line becomes the description."""
         self.assertEqual(_first_line("summary\n\nmore\nlines"), "summary")
@@ -499,6 +532,7 @@ class TestDocstringSplit(unittest.TestCase):
         """A missing docstring is empty."""
         self.assertEqual(_first_line(None), "")
         self.assertIsNone(_rest_lines(None))
+
 
 if __name__ == "__main__":
     unittest.main()

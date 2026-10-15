@@ -23,8 +23,10 @@ EDGE_SAMPLES: list[str] = [
     " leading",
 ]
 
+
 class TestTextToLines(unittest.TestCase):
     """Tests for text to lines."""
+
     def test_short_text_is_one_line(self) -> None:
         """Short text is one line."""
         self.assertEqual(text_to_lines("a b", 5), ["a b"])
@@ -95,8 +97,10 @@ class TestTextToLines(unittest.TestCase):
         """Negative width returns empty line."""
         self.assertEqual(text_to_lines("hello", -3), [""])
 
+
 class TestColorParsing(unittest.TestCase):
     """Tests for color parsing."""
+
     def setUp(self) -> None:
         """Set up the fixtures for each test."""
         self.buffer = Buffer()
@@ -139,8 +143,10 @@ class TestColorParsing(unittest.TestCase):
         with self.assertRaises(ColorCodeException):
             self._set_color("rgb:1;2")
 
+
 class TestMakeTextBox(unittest.TestCase):
     """Tests for make text box."""
+
     def test_lines_and_last(self) -> None:
         """Lines and last."""
         box = make_text_box("one\ntwo", 10, last=4)
@@ -151,8 +157,10 @@ class TestMakeTextBox(unittest.TestCase):
         """Narrow width does not hang."""
         self.assertEqual(make_text_box("a long line here", 0).lines, [""])
 
+
 class TestBufferNarrowTerminal(unittest.TestCase):
     """Tests for buffer narrow terminal."""
+
     def test_get_text_box_zero_width(self) -> None:
         """Get text box zero width."""
         buffer = Buffer()
@@ -176,6 +184,7 @@ class TestBufferNarrowTerminal(unittest.TestCase):
         self.assertTrue(
             any(line.endswith("hi") for line in buffer.get_text_box(5).lines)
         )
+
 
 if __name__ == "__main__":
     unittest.main()

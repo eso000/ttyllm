@@ -21,6 +21,7 @@ QUIT_COMMANDS = ("/q", ":q")
 
 class Key(enum.IntEnum):
     """control keys the chat reacts to"""
+
     CTRL_B = 2
     CTRL_C = 3
     CTRL_D = 4
@@ -68,6 +69,7 @@ BARE_KEYS: tuple[tuple[str, str], ...] = (
 
 class InputHandler:
     """turns keystrokes into commands, line edits, scrolling and tool approvals"""
+
     def __init__(self, supervisor: "Supervisor") -> None:
         """bind every control key to its action"""
         self.sv: "Supervisor" = supervisor

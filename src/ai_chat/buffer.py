@@ -16,6 +16,7 @@ class ColorCodeException(Exception):
 
 class Buffer:  # pylint: disable=R0902, R0904
     """one chat: message history, sampling options, looks and pending tool calls"""
+
     TOOLS: bool = False
 
     def __init__(self) -> None:
@@ -40,7 +41,7 @@ class Buffer:  # pylint: disable=R0902, R0904
         self.cond: threading.Condition = threading.Condition()
 
         self.chat_data: dict[str, Any] = {
-            "model": "llama3.2",  # mistral-nemo",
+            "model": "llama3.2",
             "stream": True,
             "think": False,
             "messages": [],
@@ -64,8 +65,8 @@ class Buffer:  # pylint: disable=R0902, R0904
 
     @property
     def openai_data(self) -> dict[str, Any]:
-
         """chat data translated into the OpenAI API request format"""
+
         def to_open_ai_msg(m: dict[str, Any]) -> dict[str, Any]:
             """one message in OpenAI chat format, images become data urls"""
             if m["role"] == "tool":
@@ -85,7 +86,9 @@ class Buffer:  # pylint: disable=R0902, R0904
                             "function": {
                                 "name": call["function"]["name"],
                                 "arguments": (
-                                    _args if isinstance(_args, str) else json.dumps(_args)
+                                    _args
+                                    if isinstance(_args, str)
+                                    else json.dumps(_args)
                                 ),
                             },
                         }
@@ -462,6 +465,7 @@ class Buffer:  # pylint: disable=R0902, R0904
 
     def set_data(self, data: dict[str, Any]) -> None:
         """replace chat and visual data from an export after validating its shape"""
+
         def _check_dict(_dict: dict[str, Any], _key: str, _instance: type) -> bool:
             """True when the key is missing or not of the expected type"""
             if _key not in _dict:

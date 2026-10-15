@@ -16,6 +16,7 @@ COMMAND_BACKGROUND = "\033[41m"
 
 class View:
     """draws the supervisor's buffers according to the UI state and never changes that state"""
+
     def __init__(self, supervisor: "Supervisor") -> None:
         """the view reads the buffers, models and help text from the supervisor"""
         self.sv: "Supervisor" = supervisor

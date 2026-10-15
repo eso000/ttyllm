@@ -15,6 +15,7 @@ from test_input_keys import content, press
 from ai_chat.state import ViewMode
 from ai_chat.supervisor import Supervisor
 
+
 @contextmanager
 def stdin_with(data: bytes, close: bool = True) -> Iterator[None]:
     """make sys.stdin a pipe holding data, optionally leaving the write end open"""
@@ -32,8 +33,10 @@ def stdin_with(data: bytes, close: bool = True) -> Iterator[None]:
         if not close:
             os.close(write_fd)
 
+
 class HandlerTestCase(unittest.TestCase):
     """Shared test case for handler."""
+
     def setUp(self) -> None:
         """Set up the fixtures for each test."""
         self.sv: Supervisor = Supervisor()
@@ -47,8 +50,10 @@ class HandlerTestCase(unittest.TestCase):
         for ch in text:
             self.handler.handle_key(ch)
 
+
 class TestKeyTable(HandlerTestCase):
     """Tests for key table."""
+
     def test_every_key_has_an_action(self) -> None:
         """Every key has an action."""
         self.assertEqual({int(key) for key in Key}, set(self.handler.keys))
@@ -79,8 +84,10 @@ class TestKeyTable(HandlerTestCase):
         self.assertEqual(self.handler.keys[Key.CTRL_E], self.sv.undo)
         self.assertEqual(self.handler.keys[Key.CTRL_C], self.sv.handle_sigint)
 
+
 class TestHandleKey(HandlerTestCase):
     """Tests for handle key."""
+
     def test_a_key_runs_its_action(self) -> None:
         """A key runs its action."""
         self.handler.handle_key("\x02")
@@ -113,6 +120,7 @@ class TestHandleKey(HandlerTestCase):
 
     def test_the_lock_is_released_when_an_action_fails(self) -> None:
         """The lock is released when an action fails."""
+
         def boom() -> None:
             """Test helper: boom."""
             raise RuntimeError("boom")
@@ -182,8 +190,10 @@ class TestHandleKey(HandlerTestCase):
         self.type("ab")
         self.assertEqual(content(self.sv), "b")
 
+
 class TestLineEditing(HandlerTestCase):
     """Tests for line editing."""
+
     def test_toggle_command_line(self) -> None:
         """Toggle command line."""
         self.handler.handle_key("\x11")
@@ -224,8 +234,10 @@ class TestLineEditing(HandlerTestCase):
             self.handler.handle_key("\t")
         redraw.assert_not_called()
 
+
 class TestSubmit(HandlerTestCase):
     """Tests for submit."""
+
     def test_enter_signals_the_watcher(self) -> None:
         """Enter signals the watcher."""
         self.type("hi\r")
@@ -262,8 +274,10 @@ class TestSubmit(HandlerTestCase):
         self.assertFalse(self.sv.ui.submitted)
         self.assertIs(self.sv.ui.mode, ViewMode.NORMAL)
 
+
 class TestReadEscape(unittest.TestCase):
     """Tests for read escape."""
+
     def _read(self, data: bytes, close: bool = True) -> str | None:
         """run read_escape on a thread so that a hang fails the test, not the suite"""
         with stdin_with(data, close):
@@ -310,8 +324,10 @@ class TestReadEscape(unittest.TestCase):
         """Bytes that are not utf8 do not crash."""
         self.assertEqual(self._read(b"\xe4A"), "\ufffdA")
 
+
 class TestApplyEscape(HandlerTestCase):
     """Tests for apply escape."""
+
     def setUp(self) -> None:
         """Set up the fixtures for each test."""
         super().setUp()
@@ -340,8 +356,10 @@ class TestApplyEscape(HandlerTestCase):
                 self.handler.apply_escape(sequence)
                 self.assertEqual(self.sv.ui.scroll, 5)
 
+
 class TestEscapeKey(unittest.TestCase):
     """Tests for escape key."""
+
     def _run(self, data: bytes) -> tuple[Supervisor, list[BaseException | None]]:
         """Test helper: run."""
         errors: list[BaseException | None] = []
@@ -385,8 +403,10 @@ class TestEscapeKey(unittest.TestCase):
         press(b"\x1b\x1b", sv)
         self.assertFalse(sv.current_buffer.updated)
 
+
 class TestHelpText(HandlerTestCase):
     """Tests for help text."""
+
     def test_shortcuts_use_the_labels_and_action_descriptions(self) -> None:
         """Shortcuts use the labels and action descriptions."""
         text = self.handler.help_text()
@@ -409,6 +429,7 @@ class TestHelpText(HandlerTestCase):
         for line in self.handler.help_text().splitlines()[2:]:
             with self.subTest(line=line):
                 self.assertTrue(line.split(":\t", 1)[-1].strip())
+
 
 if __name__ == "__main__":
     unittest.main()

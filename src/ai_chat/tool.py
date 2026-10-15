@@ -7,6 +7,7 @@ from typing import Any, Callable
 @dataclasses.dataclass
 class Parameter:
     """one argument of a tool function"""
+
     name: str
     type: str
     description: str
@@ -21,6 +22,7 @@ class Parameter:
 @dataclasses.dataclass
 class Tool:
     """a callable exposed to the model, with schema metadata"""
+
     name: str
     function: Callable[..., Any]
     description: str

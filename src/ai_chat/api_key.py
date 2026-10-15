@@ -43,8 +43,4 @@ class ApiKey:
                 except (OSError, UnicodeDecodeError):
                     value = None
         value = (value or "").strip()
-        return (
-            value
-            if value and "\r" not in value and "\n" not in value
-            else None
-        )
+        return value if value and "\r" not in value and "\n" not in value else None

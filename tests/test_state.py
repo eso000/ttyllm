@@ -7,8 +7,10 @@ from unittest import mock
 
 from ai_chat.state import UIState, ViewMode
 
+
 class TestDefaults(unittest.TestCase):
     """Tests for defaults."""
+
     def test_starts_in_the_chat_following_its_end(self) -> None:
         """Starts in the chat following its end."""
         ui = UIState()
@@ -23,8 +25,10 @@ class TestDefaults(unittest.TestCase):
         first.command = "/x"
         self.assertEqual(second.command, "")
 
+
 class TestTerminalSize(unittest.TestCase):
     """Tests for terminal size."""
+
     def test_from_terminal_reads_the_size(self) -> None:
         """From terminal reads the size."""
         with mock.patch("ai_chat.state.shutil.get_terminal_size") as size:
@@ -40,8 +44,10 @@ class TestTerminalSize(unittest.TestCase):
             ui.resize()
         self.assertEqual((ui.columns, ui.lines), (60, 20))
 
+
 class TestModes(unittest.TestCase):
     """Tests for modes."""
+
     def test_set_mode_with_a_scroll_position(self) -> None:
         """Set mode with a scroll position."""
         ui = UIState(scroll=9)
@@ -69,8 +75,10 @@ class TestModes(unittest.TestCase):
         self.assertIs(ui.mode, ViewMode.NORMAL)
         self.assertEqual(ui.scroll, -1)
 
+
 class TestScrolling(unittest.TestCase):
     """Tests for scrolling."""
+
     def test_up_from_the_end_goes_to_the_last_full_page(self) -> None:
         """Up from the end goes to the last full page."""
         ui = UIState(scroll=-1, scroll_max=30)
@@ -120,8 +128,10 @@ class TestScrolling(unittest.TestCase):
         ui.scroll_to_end()
         self.assertEqual(ui.scroll, -1)
 
+
 class TestNotification(unittest.TestCase):
     """Tests for notification."""
+
     def test_set_scrolls_to_the_start(self) -> None:
         """Set scrolls to the start."""
         ui = UIState(scroll=12)
@@ -138,8 +148,10 @@ class TestNotification(unittest.TestCase):
         self.assertEqual(ui.notification, "")
         self.assertFalse(ui.dismiss_notification())
 
+
 class TestTakeCommand(unittest.TestCase):
     """Tests for take command."""
+
     def test_returns_and_clears_the_command(self) -> None:
         """Returns and clears the command."""
         ui = UIState(command="/sm llama")
@@ -174,6 +186,7 @@ class TestTakeCommand(unittest.TestCase):
         self.assertTrue(woke.wait(2))
         thread.join(2)
         self.assertFalse(thread.is_alive())
+
 
 if __name__ == "__main__":
     unittest.main()

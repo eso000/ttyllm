@@ -18,18 +18,23 @@ from ai_chat.requester import Requester
 from ai_chat.supervisor import Supervisor
 from test_input_handler import stdin_with
 
+
 def message(role: str, content: str = "") -> dict[str, Any]:
     """Test helper: message."""
     return {"role": role, "content": content}
 
+
 class TestConstruction(unittest.TestCase):
     """Tests for construction."""
+
     def test_creating_a_supervisor_has_no_side_effects(self) -> None:
         """Creating a supervisor has no side effects."""
         out = io.StringIO()
-        with mock.patch.object(Requester, "get_models") as get_models, mock.patch.object(
-            supervisor_module.signal, "signal"
-        ) as register, contextlib.redirect_stdout(out):
+        with (
+            mock.patch.object(Requester, "get_models") as get_models,
+            mock.patch.object(supervisor_module.signal, "signal") as register,
+            contextlib.redirect_stdout(out),
+        ):
             sv = Supervisor()
         get_models.assert_not_called()
         register.assert_not_called()
@@ -86,8 +91,10 @@ class TestConstruction(unittest.TestCase):
         self.assertIs(sv.keyboard.sv, sv)
         self.assertIs(sv.view.sv, sv)
 
+
 class TestBufferNavigation(unittest.TestCase):
     """Tests for buffer navigation."""
+
     def setUp(self) -> None:
         """Set up the fixtures for each test."""
         self.sv = Supervisor()
@@ -119,8 +126,10 @@ class TestBufferNavigation(unittest.TestCase):
         self.sv.buffer_previous()
         self.assertTrue(self.sv.buffers[0].updated)
 
+
 class TestSplit(unittest.TestCase):
     """Tests for split."""
+
     def setUp(self) -> None:
         """Set up the fixtures for each test."""
         self.sv = Supervisor()
@@ -160,8 +169,10 @@ class TestSplit(unittest.TestCase):
         self.assertEqual(len(self.sv.buffers), 1)
         self.assertIn("pending tool calls", self.sv.ui.notification)
 
+
 class TestDelete(unittest.TestCase):
     """Tests for delete."""
+
     def setUp(self) -> None:
         """Set up the fixtures for each test."""
         self.sv = Supervisor()
@@ -203,7 +214,11 @@ class TestDelete(unittest.TestCase):
         """Deleting declines pending tool calls."""
         doomed = self.sv.current_buffer
         call: dict[str, Any] = {
-            "id": "1", "name": "t", "args": {}, "approved": None, "result": None
+            "id": "1",
+            "name": "t",
+            "args": {},
+            "approved": None,
+            "result": None,
         }
         doomed.set_pending([call])
         self.sv.buffer_delete()
@@ -231,8 +246,10 @@ class TestDelete(unittest.TestCase):
         self.assertTrue(woken.wait(2))
         thread.join(2)
 
+
 class TestMessageOperations(unittest.TestCase):
     """Tests for message operations."""
+
     def setUp(self) -> None:
         """Set up the fixtures for each test."""
         self.sv = Supervisor()
@@ -279,6 +296,7 @@ class TestMessageOperations(unittest.TestCase):
         self.sv.start_over()
         self.assertEqual(other.chat_data["messages"], before)
 
+
 @contextlib.contextmanager
 def fake_terminal_into(events: list[str]) -> Iterator[None]:
     """Test helper: fake terminal into."""
@@ -288,8 +306,10 @@ def fake_terminal_into(events: list[str]) -> Iterator[None]:
     finally:
         events.append("terminal out")
 
+
 class TestRunChat(unittest.TestCase):
     """Tests for run chat."""
+
     def setUp(self) -> None:
         """Set up the fixtures for each test."""
         self.sv = Supervisor()
@@ -319,6 +339,7 @@ class TestRunChat(unittest.TestCase):
 
     def _get_models(self, models: list[Model]) -> mock._patch[mock.MagicMock]:
         """Test helper: get models."""
+
         def get_models() -> ModelList:
             """Test helper: get models."""
             self.events.append("models")
@@ -371,8 +392,10 @@ class TestRunChat(unittest.TestCase):
 
     def test_everything_is_undone_when_starting_a_thread_fails(self) -> None:
         """Everything is undone when starting a thread fails."""
+
         class BrokenThread:
             """Test helper: broken thread."""
+
             def __init__(self, *args: Any, **kwargs: Any) -> None:
                 """Test helper: init."""
                 pass
@@ -381,9 +404,11 @@ class TestRunChat(unittest.TestCase):
                 """Test helper: start."""
                 raise RuntimeError("cannot start")
 
-        with self._get_models([Model("m")]), mock.patch.object(
-            supervisor_module.threading, "Thread", BrokenThread
-        ), self.assertRaises(RuntimeError):
+        with (
+            self._get_models([Model("m")]),
+            mock.patch.object(supervisor_module.threading, "Thread", BrokenThread),
+            self.assertRaises(RuntimeError),
+        ):
             self.sv.run_chat()
         self.assertEqual(self.events[-2:], ["signal restored", "terminal out"])
 
@@ -394,6 +419,7 @@ class TestRunChat(unittest.TestCase):
 
         def record(key: str, target: Callable[[], None]) -> Callable[[], None]:
             """Test helper: record."""
+
             def inner() -> None:
                 """Test helper: inner."""
                 names[key] = threading.current_thread().name
@@ -425,13 +451,18 @@ class TestRunChat(unittest.TestCase):
         self._run([Model("m")])
         self.assertFalse(self.sv.run)
         self.assertEqual(
-            [t.name for t in threading.enumerate() if t.name in (
-                "input", "render", "dispatch", "replies")],
+            [
+                t.name
+                for t in threading.enumerate()
+                if t.name in ("input", "render", "dispatch", "replies")
+            ],
             [],
         )
 
+
 class TestResize(unittest.TestCase):
     """Tests for resize."""
+
     def setUp(self) -> None:
         """Set up the fixtures for each test."""
         self.sv = Supervisor()
@@ -457,7 +488,9 @@ class TestResize(unittest.TestCase):
         self._resize(132, 43)
         self.assertEqual((self.sv.ui.columns, self.sv.ui.lines), (132, 43))
 
-    def test_the_screen_is_cleared_and_the_status_line_redrawn_in_that_order(self) -> None:
+    def test_the_screen_is_cleared_and_the_status_line_redrawn_in_that_order(
+        self,
+    ) -> None:
         """The screen is cleared and the status line redrawn in that order."""
         self._resize(100, 30)
         self.assertEqual(self.calls, ["clean_screen", "draw_command_line"])
@@ -468,8 +501,10 @@ class TestResize(unittest.TestCase):
         self._resize(100, 30)
         self.assertTrue(self.sv.current_buffer.updated)
 
+
 class TestGuarded(unittest.TestCase):
     """Tests for guarded."""
+
     def test_a_failure_names_the_thread(self) -> None:
         """A failure names the thread."""
         sv = Supervisor()
@@ -495,6 +530,7 @@ class TestGuarded(unittest.TestCase):
         calls: list[int] = []
         sv._guarded("render", lambda: calls.append(1))()
         self.assertEqual(calls, [])
+
 
 if __name__ == "__main__":
     unittest.main()

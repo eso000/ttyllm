@@ -8,8 +8,10 @@ from ai_chat.completion import candidates, complete
 
 MODELS = ["llama3.2", "llama3.1", "mistral"]
 
+
 class TestCandidates(unittest.TestCase):
     """Tests for candidates."""
+
     def test_a_command_without_an_argument_has_none(self) -> None:
         """A command without an argument has none."""
         self.assertEqual(candidates(":sm", MODELS), ("", []))
@@ -17,9 +19,7 @@ class TestCandidates(unittest.TestCase):
 
     def test_models_are_filtered_by_prefix(self) -> None:
         """Models are filtered by prefix."""
-        self.assertEqual(
-            candidates(":sm ll", MODELS), ("ll", ["llama3.2", "llama3.1"])
-        )
+        self.assertEqual(candidates(":sm ll", MODELS), ("ll", ["llama3.2", "llama3.1"]))
 
     def test_an_empty_argument_offers_every_model(self) -> None:
         """An empty argument offers every model."""
@@ -39,8 +39,10 @@ class TestCandidates(unittest.TestCase):
         """Only the second word is completed."""
         self.assertEqual(candidates(":sm ll extra", MODELS)[0], "ll")
 
+
 class TestComplete(unittest.TestCase):
     """Tests for complete."""
+
     def test_single_match_completes_fully(self) -> None:
         """Single match completes fully."""
         self.assertEqual(complete(":sm mi", MODELS), "stral")
@@ -65,8 +67,10 @@ class TestComplete(unittest.TestCase):
         """No models."""
         self.assertEqual(complete(":sm l", []), "")
 
+
 class TestPaths(unittest.TestCase):
     """Tests for paths."""
+
     def setUp(self) -> None:
         """Set up the fixtures for each test."""
         folder = tempfile.TemporaryDirectory()
@@ -97,6 +101,7 @@ class TestPaths(unittest.TestCase):
     def test_nothing_matches(self) -> None:
         """Nothing matches."""
         self.assertEqual(complete(f":i {self.folder}/zzz", []), "")
+
 
 if __name__ == "__main__":
     unittest.main()

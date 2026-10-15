@@ -8,6 +8,7 @@ from enum import Enum
 
 class ViewMode(Enum):
     """which view is currently displayed"""
+
     NORMAL = 0
     SYSTEM = 1
     DATA = 2
@@ -26,6 +27,7 @@ class UIState:
     take it themselves, so callers must not hold it while doing slow work.
     submitted is the flag the watcher waits for and take_command clears.
     """
+
     mode: ViewMode = ViewMode.NORMAL
     scroll: int = -1
     scroll_max: int = -1

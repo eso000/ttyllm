@@ -26,6 +26,7 @@ from ai_chat.api_key import ApiKey, ApiKeyType
 
 GIB = 1073741824
 
+
 def _http_response(payload: Any, content_type: str = "application/json") -> bytes:
     """Test helper: http response."""
     body = json.dumps(payload).encode()
@@ -36,6 +37,7 @@ def _http_response(payload: Any, content_type: str = "application/json") -> byte
         "\r\n"
     ).encode()
     return head + body
+
 
 def _sse_response(*events: str) -> bytes:
     """build a chunked text/event-stream http response from raw sse events"""
@@ -50,6 +52,7 @@ def _sse_response(*events: str) -> bytes:
         "\r\n"
     ).encode()
     return head + chunks + b"0\r\n\r\n"
+
 
 def _serve_once(response: bytes) -> tuple[int, threading.Thread]:
     """start a one-shot http server, return its port"""
@@ -73,6 +76,7 @@ def _serve_once(response: bytes) -> tuple[int, threading.Thread]:
     thread = threading.Thread(target=run, daemon=True)
     thread.start()
     return port, thread
+
 
 def _serve_capture(response: bytes) -> tuple[int, threading.Thread, queue.Queue[bytes]]:
     """start a one-shot http server that records the request it receives"""
@@ -99,6 +103,7 @@ def _serve_capture(response: bytes) -> tuple[int, threading.Thread, queue.Queue[
     thread.start()
     return port, thread, received
 
+
 def _closed_port() -> int:
     """Test helper: closed port."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -106,6 +111,7 @@ def _closed_port() -> int:
     port = sock.getsockname()[1]
     sock.close()
     return port
+
 
 def _serve_stall(
     connected: threading.Event | None = None,
@@ -135,6 +141,7 @@ def _serve_stall(
     thread.start()
     return port, thread
 
+
 def _self_signed_cert(directory: str) -> tuple[str, str]:
     """generate a throwaway self-signed cert for localhost with the openssl cli"""
     certfile = os.path.join(directory, "cert.pem")
@@ -160,6 +167,7 @@ def _self_signed_cert(directory: str) -> tuple[str, str]:
         capture_output=True,
     )
     return certfile, keyfile
+
 
 def _serve_tls_once(
     response: bytes, certfile: str, keyfile: str
@@ -188,6 +196,7 @@ def _serve_tls_once(
     thread.start()
     return port, thread
 
+
 def _unverified_context() -> ssl.SSLContext:
     """a client context that skips verification, for the self-signed test server"""
     context = ssl.create_default_context()
@@ -195,8 +204,10 @@ def _unverified_context() -> ssl.SSLContext:
     context.verify_mode = ssl.CERT_NONE
     return context
 
+
 class TestModelListFromResponse(unittest.TestCase):
     """Tests for model list from response."""
+
     def test_openai_provides_names_only(self) -> None:
         """Openai provides names only."""
         models = ModelList.from_response({"data": [{"id": "gpt-4o"}, {"id": "o1"}]})
@@ -260,8 +271,10 @@ class TestModelListFromResponse(unittest.TestCase):
         self.assertEqual(models.short, "no models available\n")
         self.assertEqual(models.names, [])
 
+
 class TestModelListShort(unittest.TestCase):
     """Tests for model list short."""
+
     def test_openai_names_only(self) -> None:
         """Openai names only."""
         self.assertEqual(ModelList([Model("gpt-4o")]).short, "gpt-4o\n")
@@ -271,8 +284,10 @@ class TestModelListShort(unittest.TestCase):
         line = ModelList([Model("llama3.2", 2, "3B")]).short
         self.assertEqual(line, f"{'llama3.2':<20}\t 2 GB\t3B\n")
 
+
 class TestGetModels(unittest.TestCase):
     """Tests for get models."""
+
     def test_ollama_response(self) -> None:
         """Ollama response."""
         port, _ = _serve_once(
@@ -322,8 +337,10 @@ class TestGetModels(unittest.TestCase):
         request.get_models()
         self.assertIsNone(request.models_error)
 
+
 class TestApiKeyHeader(unittest.TestCase):
     """Tests for api key header."""
+
     def test_post_has_bearer_header_when_a_key_is_set(self) -> None:
         """Post has bearer header when a key is set."""
         request = Requester(api_key=ApiKey("sk-123", ApiKeyType.RAW))
@@ -344,9 +361,7 @@ class TestApiKeyHeader(unittest.TestCase):
 
     def test_models_request_has_bearer_header_when_a_key_is_set(self) -> None:
         """Models request has bearer header when a key is set."""
-        port, _, received = _serve_capture(
-            _http_response({"data": [{"id": "gpt-4o"}]})
-        )
+        port, _, received = _serve_capture(_http_response({"data": [{"id": "gpt-4o"}]}))
         request = Requester(
             port=port, open_api=True, api_key=ApiKey("sk-123", ApiKeyType.RAW)
         )
@@ -355,9 +370,7 @@ class TestApiKeyHeader(unittest.TestCase):
 
     def test_models_request_has_no_header_without_a_key(self) -> None:
         """Models request has no header without a key."""
-        port, _, received = _serve_capture(
-            _http_response({"data": [{"id": "gpt-4o"}]})
-        )
+        port, _, received = _serve_capture(_http_response({"data": [{"id": "gpt-4o"}]}))
         request = Requester(port=port, open_api=True)
         self.assertEqual(list(request.get_models()), [Model("gpt-4o")])
         self.assertNotIn(b"Authorization", received.get(timeout=5))
@@ -365,6 +378,7 @@ class TestApiKeyHeader(unittest.TestCase):
 
 class TestEndpoint(unittest.TestCase):
     """Tests for endpoint."""
+
     def test_https_url_enables_tls_on_the_default_port(self) -> None:
         """Https url enables tls on the default port."""
         request = Requester()
@@ -432,8 +446,10 @@ class TestEndpoint(unittest.TestCase):
         request.set_endpoint("otherhost")
         self.assertEqual(request.endpoint, f"otherhost:{request.port}")
 
+
 class TestConnect(unittest.TestCase):
     """Tests for connect."""
+
     def test_plain_connection_is_returned_as_is(self) -> None:
         """Plain connection is returned as is."""
         request = Requester(host="127.0.0.1", port=11434)
@@ -445,9 +461,10 @@ class TestConnect(unittest.TestCase):
     def test_tls_connection_is_wrapped_with_the_server_name(self) -> None:
         """Tls connection is wrapped with the server name."""
         request = Requester(host="api.example.com", port=443, tls=True)
-        with mock.patch("ai_chat.requester.socket.socket") as socket_mock, mock.patch(
-            "ai_chat.requester.ssl.create_default_context"
-        ) as context_mock:
+        with (
+            mock.patch("ai_chat.requester.socket.socket") as socket_mock,
+            mock.patch("ai_chat.requester.ssl.create_default_context") as context_mock,
+        ):
             raw = socket_mock.return_value
             wrapped = context_mock.return_value.wrap_socket.return_value
             self.assertIs(request._connect(), wrapped)
@@ -458,9 +475,10 @@ class TestConnect(unittest.TestCase):
     def test_tls_context_is_built_once(self) -> None:
         """Tls context is built once."""
         request = Requester(host="api.example.com", tls=True)
-        with mock.patch("ai_chat.requester.socket.socket"), mock.patch(
-            "ai_chat.requester.ssl.create_default_context"
-        ) as context_mock:
+        with (
+            mock.patch("ai_chat.requester.socket.socket"),
+            mock.patch("ai_chat.requester.ssl.create_default_context") as context_mock,
+        ):
             request._connect()
             request._connect()
         context_mock.assert_called_once()
@@ -475,18 +493,21 @@ class TestConnect(unittest.TestCase):
     def test_raw_socket_is_closed_when_wrapping_fails(self) -> None:
         """Raw socket is closed when wrapping fails."""
         request = Requester(host="api.example.com", tls=True)
-        with mock.patch("ai_chat.requester.socket.socket") as socket_mock, mock.patch(
-            "ai_chat.requester.ssl.create_default_context"
-        ) as context_mock:
+        with (
+            mock.patch("ai_chat.requester.socket.socket") as socket_mock,
+            mock.patch("ai_chat.requester.ssl.create_default_context") as context_mock,
+        ):
             raw = socket_mock.return_value
             context_mock.return_value.wrap_socket.side_effect = OSError("tls failed")
             with self.assertRaises(OSError):
                 request._connect()
         raw.close.assert_called_once()
 
+
 @unittest.skipUnless(shutil.which("openssl"), "the openssl cli is required")
 class TestTlsConnection(unittest.TestCase):
     """Tests for tls connection."""
+
     def test_https_request_is_served_over_tls(self) -> None:
         """Https request is served over tls."""
         with tempfile.TemporaryDirectory() as directory:
@@ -502,8 +523,10 @@ class TestTlsConnection(unittest.TestCase):
         self.assertEqual(list(result), [Model("gpt-4o")])
         self.assertIsNone(request.models_error)
 
+
 class TestSupervisorModelAttributes(unittest.TestCase):
     """Tests for supervisor model attributes."""
+
     def test_load_models_on_unreachable_server_is_safe(self) -> None:
         """Load models on unreachable server is safe."""
         supervisor = Supervisor.__new__(Supervisor)
@@ -525,8 +548,10 @@ class TestSupervisorModelAttributes(unittest.TestCase):
         self.assertEqual(supervisor.models.names, ["gpt-4o", "o1"])
         self.assertEqual(supervisor.models.short, "gpt-4o\no1\n")
 
+
 class TestReplyErrors(unittest.TestCase):
     """Tests for reply errors."""
+
     def test_connection_error_is_returned(self) -> None:
         """Connection error is returned."""
         chat = Buffer()
@@ -627,8 +652,10 @@ class TestReplyErrors(unittest.TestCase):
         error = request.get_reply(Buffer())
         self.assertIn("timed out", error)  # type: ignore[arg-type]
 
+
 class TestGetHeader(unittest.TestCase):
     """Tests for get header."""
+
     def test_body_after_header_terminator_is_kept(self) -> None:
         # _get_header must not drop bytes that followed the first \r\n\r\n
         """Body after header terminator is kept."""
@@ -647,8 +674,10 @@ class TestGetHeader(unittest.TestCase):
         self.assertIn("HTTP/1.1 200 OK", head)
         self.assertEqual(body, b"data: one\r\n\r\ndata: two\r\n\r\n")
 
+
 class TestStreamingUsage(unittest.TestCase):
     """Tests for streaming usage."""
+
     def test_usage_only_chunk_is_not_a_choice(self) -> None:
         # OpenAI sends the usage chunk after finish_reason: "stop", with an
         # empty choices array; it must not be parsed as a choice
@@ -702,8 +731,10 @@ class TestStreamingUsage(unittest.TestCase):
         chat.chat_data["stream"] = False
         self.assertNotIn("stream_options", chat.openai_data)
 
+
 class TestOpenAiToolMessages(unittest.TestCase):
     """Tests for open ai tool messages."""
+
     def _chat(self) -> Buffer:
         """Test helper: chat."""
         chat = Buffer()
@@ -775,8 +806,10 @@ class TestOpenAiToolMessages(unittest.TestCase):
         call = chat.openai_data["messages"][2]["tool_calls"][0]
         self.assertEqual(call["function"]["arguments"], '{"text": "a"}')
 
+
 class TestOpenAiToolStreaming(unittest.TestCase):
     """Tests for open ai tool streaming."""
+
     def test_fragmented_arguments_are_accumulated(self) -> None:
         """Fragmented arguments are accumulated."""
         requester_ = Requester()
@@ -889,8 +922,10 @@ class TestOpenAiToolStreaming(unittest.TestCase):
         )
         self.assertEqual(messages[1]["tool_call_id"], "call_1")
 
+
 class TestNotification(unittest.TestCase):
     """Tests for notification."""
+
     def setUp(self) -> None:
         """Set up the fixtures for each test."""
         self.supervisor = Supervisor.__new__(Supervisor)
@@ -931,8 +966,10 @@ class TestNotification(unittest.TestCase):
         self.assertTrue(self.supervisor.buffers[0].updated)
         self.assertEqual(self.supervisor.ui.scroll, 0)
 
+
 class TestHelp(unittest.TestCase):
     """Tests for help."""
+
     def setUp(self) -> None:
         """Set up the fixtures for each test."""
         self.supervisor = Supervisor.__new__(Supervisor)
@@ -964,6 +1001,7 @@ class TestHelp(unittest.TestCase):
         """Supervisor owns the command table."""
         supervisor = Supervisor()
         self.assertIn("sm", supervisor.commands.table)
+
 
 if __name__ == "__main__":
     unittest.main()

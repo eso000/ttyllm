@@ -11,12 +11,15 @@ from ai_chat.models import Model, ModelList
 from ai_chat.state import ViewMode
 from ai_chat.supervisor import Supervisor
 
+
 def _text(box: Any) -> str:
     """Test helper: text."""
     return "\n".join(box.lines)
 
+
 class ViewTestCase(unittest.TestCase):
     """Shared test case for view."""
+
     def setUp(self) -> None:
         """Set up the fixtures for each test."""
         self.sv = Supervisor()
@@ -25,8 +28,10 @@ class ViewTestCase(unittest.TestCase):
         self.ui.columns, self.ui.lines = 80, 24
         self.buffer = self.sv.current_buffer
 
+
 class TestCompose(ViewTestCase):
     """Tests for compose."""
+
     def setUp(self) -> None:
         """Set up the fixtures for each test."""
         super().setUp()
@@ -135,8 +140,10 @@ class TestCompose(ViewTestCase):
         self.assertIs(self.view.ui, other)
         self.assertEqual(self.view.box_width, 46)
 
+
 class TestDraw(ViewTestCase):
     """Tests for draw."""
+
     def test_draw_uses_the_terminal_size(self) -> None:
         """Draw uses the terminal size."""
         box, _ = self.view.compose(self.buffer, -1)
@@ -145,8 +152,10 @@ class TestDraw(ViewTestCase):
         self.assertEqual(result, (5, -1))
         fit.assert_called_once_with(box, 76, 19, 2, 3, hide_cursor=True)
 
+
 class TestStatusLine(ViewTestCase):
     """Tests for status line."""
+
     def _buffers(self, count: int) -> list[Buffer]:
         """Test helper: buffers."""
         self.sv.buffers = [Buffer() for _ in range(count)]
@@ -214,6 +223,7 @@ class TestStatusLine(ViewTestCase):
             self.view.draw_command_line()
         self.assertIn("model:", fit.call_args.args[0])
         self.assertTrue(fit.call_args.kwargs["hide_cursor"])
+
 
 if __name__ == "__main__":
     unittest.main()

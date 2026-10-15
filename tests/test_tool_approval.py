@@ -10,14 +10,17 @@ from ai_chat.requester import Requester
 from ai_chat.tool import Parameter, Tool
 from test_requester import _http_response, _serve_once
 
+
 def _call(
     name: str = "echo", args: Any = None, call_id: str = "call_1"
 ) -> dict[str, Any]:
     """Test helper: call."""
     return {"id": call_id, "function": {"name": name, "arguments": args or {}}}
 
+
 class ToolTestCase(unittest.TestCase):
     """Shared test case for tool."""
+
     def setUp(self) -> None:
         """Set up the fixtures for each test."""
         self.executed: list[str] = []
@@ -36,8 +39,10 @@ class ToolTestCase(unittest.TestCase):
         self.chat.add_msg("assistant")
         self.requester = Requester()
 
+
 class TestCollectingToolCalls(ToolTestCase):
     """Tests for collecting tool calls."""
+
     def test_tool_is_not_run_before_approval(self) -> None:
         """Tool is not run before approval."""
         self.requester._handle_tool_call(self.chat, [_call(args={"text": "hi"})])
@@ -68,8 +73,10 @@ class TestCollectingToolCalls(ToolTestCase):
         self.requester._handle_tool_call(self.chat, [call])
         self.assertIsNone(self.chat.pending_calls[0]["id"])
 
+
 class TestDeciding(ToolTestCase):
     """Tests for deciding."""
+
     def setUp(self) -> None:
         """Set up the fixtures for each test."""
         super().setUp()
@@ -140,8 +147,10 @@ class TestDeciding(ToolTestCase):
         self.assertFalse(self.chat.abort_pending())
         self.assertEqual(len(self.chat.pending_calls), 2)
 
+
 class TestBufferWhilePending(ToolTestCase):
     """Tests for buffer while pending."""
+
     def setUp(self) -> None:
         """Set up the fixtures for each test."""
         super().setUp()
@@ -172,8 +181,10 @@ class TestBufferWhilePending(ToolTestCase):
         self.chat.empty()
         self.assertEqual(self.chat.pending_calls, [])
 
+
 class TestRequestEndsAtToolCall(ToolTestCase):
     """Tests for request ends at tool call."""
+
     def test_request_terminates_and_waits_for_approval(self) -> None:
         """Request terminates and waits for approval."""
         chat = Buffer()
@@ -203,6 +214,7 @@ class TestRequestEndsAtToolCall(ToolTestCase):
         error = requester.get_reply(chat, wrapped=True)
         self.assertIn("exceeded", error)  # type: ignore[arg-type]
         self.assertEqual(chat.chat_data["messages"][-1]["role"], "user")
+
 
 if __name__ == "__main__":
     unittest.main()

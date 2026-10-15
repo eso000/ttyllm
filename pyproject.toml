@@ -28,6 +28,9 @@ classifiers = [
 ]
 dependencies = []
 
+[project.optional-dependencies]
+dev = ["black>=26.5,<27", "mypy>=1.11"]
+
 [project.scripts]
 ai-chat = "ai_chat.cli:main"
 
@@ -36,3 +39,10 @@ path = "src/ai_chat/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ai_chat"]
+
+[tool.black]
+target-version = ["py310"]
+
+[tool.mypy]
+files = ["src", "tests"]
+mypy_path = "src"

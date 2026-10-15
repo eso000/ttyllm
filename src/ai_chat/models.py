@@ -10,6 +10,7 @@ GIB = 1073741824
 @dataclasses.dataclass
 class Model:
     """a model as reported by the server"""
+
     name: str
     size_gb: int | None = None
     parameter_size: str | None = None
@@ -74,7 +75,5 @@ class ModelList:
         if model.size_gb is None:  # openai api provides names only
             return f"{model.name}\n"
         return (
-            f"{model.name:<20}"
-            f"\t {model.size_gb} GB"
-            f"\t{model.parameter_size}\n"
+            f"{model.name:<20}" f"\t {model.size_gb} GB" f"\t{model.parameter_size}\n"
         )
