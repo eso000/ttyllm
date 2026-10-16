@@ -1,6 +1,7 @@
 """Tests for the request queue, worker threads and cancellation."""
 
 import os
+import select
 import sys
 import threading
 import time
@@ -119,6 +120,10 @@ class TestCancel(unittest.TestCase):
         for _ in range(3):
             chat.cancel_request()
         chat.in_request = False
+        queue = RequestQueue()
+        queue.schedule(chat)
+        self.assertIs(queue.next, chat)
+        self.assertFalse(chat.cancel)
         self.assertIsNone(Requester(port=port).get_reply(chat))
         self.assertEqual(chat.chat_data["messages"][-2]["content"], "hi")
 
@@ -170,6 +175,175 @@ class TestRequestQueue(unittest.TestCase):
             for thread in threads:
                 thread.join()
             self.assertEqual(len(queue.qu), 1)
+
+    def test_next_hands_the_chat_over_atomically(self) -> None:
+        """Next hands the chat over atomically."""
+        queue = RequestQueue()
+        chat = Buffer()
+        chat.in_request = True
+        chat.cancel_request()
+        chat.in_request = False
+        queue.schedule(chat)
+        self.assertIs(queue.next, chat)
+        self.assertTrue(chat.in_request)
+        self.assertFalse(chat.queued)
+        self.assertFalse(chat.cancel)
+        queue.schedule(chat)
+        self.assertEqual(queue.qu, [])
+
+
+class FakeRequest:
+    """Test helper: a request that runs until its buffer is cancelled."""
+
+    def __init__(self, chat: Buffer) -> None:
+        """Test helper: init."""
+        self.chat = chat
+        self.stopped = threading.Event()
+        chat.begin_request()
+        self.thread = threading.Thread(target=self.run)
+        self.thread.start()
+
+    def run(self) -> None:
+        """Test helper: run."""
+        select.select([self.chat.pipe[0]], [], [], 5)
+        self.chat.add_msg("user")
+        self.stopped.set()
+        self.chat.end_request()
+
+
+def message(role: str, content: str = "") -> dict[str, Any]:
+    """Test helper: message."""
+    return {"role": role, "content": content}
+
+
+class TestStopRequest(unittest.TestCase):
+    """Tests for stopping a queued or running request before editing a buffer."""
+
+    def setUp(self) -> None:
+        """Set up the fixtures for each test."""
+        self.sv = Supervisor()
+        self.buffer = self.sv.current_buffer
+        self.buffer.chat_data["messages"] = [
+            message("system", "rules"),
+            message("user", "question"),
+            message("assistant", "answer"),
+            message("user"),
+        ]
+
+    def roles(self) -> list[str]:
+        """Test helper: roles."""
+        return [m["role"] for m in self.buffer.chat_data["messages"]]
+
+    def test_redo_cancels_the_running_request_first(self) -> None:
+        """Redo cancels the running request first."""
+        request = FakeRequest(self.buffer)
+        self.sv.redo()
+        request.thread.join(2)
+        self.assertTrue(request.stopped.is_set())
+        self.assertFalse(self.buffer.in_request)
+        self.assertEqual(self.roles(), ["system", "user"])
+        self.assertTrue(self.buffer.queued)
+        self.assertFalse(self.sv.ui.notification)
+
+    def test_start_over_cancels_the_running_request_first(self) -> None:
+        """Start over cancels the running request first."""
+        request = FakeRequest(self.buffer)
+        self.sv.start_over()
+        request.thread.join(2)
+        self.assertTrue(request.stopped.is_set())
+        self.assertEqual(self.roles(), ["system"])
+
+    def test_undo_and_correct_cancel_the_running_request_first(self) -> None:
+        """Undo and correct cancel the running request first."""
+        request = FakeRequest(self.buffer)
+        self.sv.undo()
+        request.thread.join(2)
+        self.assertTrue(request.stopped.is_set())
+        self.assertEqual(self.roles(), ["system", "user"])
+        request = FakeRequest(self.buffer)
+        self.sv.correct()
+        request.thread.join(2)
+        self.assertTrue(request.stopped.is_set())
+
+    def test_edit_is_refused_when_the_request_does_not_stop(self) -> None:
+        """Edit is refused when the request does not stop."""
+        self.buffer.in_request = True  # a tool that cannot be interrupted
+        before = list(self.buffer.chat_data["messages"])
+        with mock.patch.object(Supervisor, "STOP_TIMEOUT", 0.05):
+            for edit in (
+                self.sv.redo,
+                self.sv.undo,
+                self.sv.correct,
+                self.sv.start_over,
+            ):
+                self.sv.ui.notification = ""
+                edit()
+                self.assertIn("reply is running", self.sv.ui.notification)
+        self.assertEqual(self.buffer.chat_data["messages"], before)
+        self.assertFalse(self.buffer.queued)
+
+    def test_redo_leaves_a_queued_prompt_alone(self) -> None:
+        """Redo leaves a queued prompt alone."""
+        self.buffer.chat_data["messages"][-1]["content"] = "next"
+        self.sv.queue.schedule(self.buffer)
+        self.sv.redo()
+        self.assertEqual(self.roles(), ["system", "user", "assistant", "user"])
+        self.assertTrue(self.buffer.queued)
+
+    def test_undo_drops_only_a_queued_prompt(self) -> None:
+        """Undo drops only a queued prompt."""
+        self.buffer.chat_data["messages"][-1]["content"] = "next"
+        self.sv.queue.schedule(self.buffer)
+        self.sv.undo()
+        self.assertEqual(self.roles(), ["system", "user", "assistant", "user"])
+        self.assertEqual(self.buffer.chat_data["messages"][-1]["content"], "")
+        self.assertFalse(self.buffer.queued)
+
+    def test_buffer_edits_refuse_while_busy(self) -> None:
+        """Buffer edits refuse while busy."""
+        for flag in ("in_request", "queued"):
+            setattr(self.buffer, flag, True)
+            before = list(self.buffer.chat_data["messages"])
+            self.assertFalse(self.buffer.del_msg(1))
+            self.assertFalse(self.buffer.empty())
+            self.assertEqual(self.buffer.chat_data["messages"], before)
+            setattr(self.buffer, flag, False)
+        self.assertTrue(self.buffer.del_msg(1))
+        self.assertTrue(self.buffer.empty())
+
+    def test_delete_cancels_the_running_request(self) -> None:
+        """Delete cancels the running request."""
+        request = FakeRequest(self.buffer)
+        self.sv.buffer_delete()
+        self.assertTrue(request.stopped.wait(2))
+        request.thread.join(2)
+        self.assertNotIn(self.buffer, self.sv.buffers)
+
+    def test_split_is_refused_while_a_reply_runs(self) -> None:
+        """Split is refused while a reply runs."""
+        self.buffer.in_request = True
+        self.sv.split()
+        self.assertEqual(len(self.sv.buffers), 1)
+        self.assertIn("reply is running", self.sv.ui.notification)
+        self.buffer.in_request = False
+        self.buffer.queued = True
+        self.sv.split()
+        self.assertEqual(len(self.sv.buffers), 1)
+
+    def test_queue_worker_clears_in_request_after_an_error(self) -> None:
+        """Queue worker clears in request after an error."""
+        self.sv.run = True
+        self.sv.queue.schedule(self.buffer)
+
+        def fail(_chat: Buffer) -> None:
+            """Test helper: fail."""
+            self.sv.run = False
+            raise RuntimeError("boom")
+
+        with mock.patch.object(self.sv, "get_reply", fail):
+            with self.assertRaises(RuntimeError):
+                self.sv.queue_manager()
+        self.assertFalse(self.buffer.in_request)
 
 
 class TestInput(unittest.TestCase):

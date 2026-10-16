@@ -16,10 +16,11 @@ class RequestQueue:
     def schedule(self, chat: Buffer) -> None:
         """add a chat to the queue unless it is already queued or running"""
         with self.cond:
-            if chat.queued or chat.in_request:
-                return
+            with chat.cond:
+                if chat.queued or chat.in_request:
+                    return
+                chat.queued = True
             self.qu.append(chat)
-            chat.queued = True
             self.cond.notify()
             chat.notify()
 
@@ -28,17 +29,19 @@ class RequestQueue:
         with self.cond:
             for index, scheduled_chat in enumerate(self.qu):
                 if scheduled_chat == chat:
-                    chat.queued = False
+                    with chat.cond:
+                        chat.queued = False
                     self.qu.pop(index)
                     chat.notify()
                     return
 
     @property
     def next(self) -> Buffer:
-        """pop the oldest queued chat"""
+        """pop the oldest queued chat and mark it as in request in the same step,
+        so it is never neither queued nor running"""
         with self.cond:
             chat = self.qu.pop(0)
-            chat.queued = False
+            chat.begin_request()
             chat.notify()
             return chat
 

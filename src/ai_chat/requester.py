@@ -353,8 +353,7 @@ class Requester:
                         }
                     )
         except BaseException:
-            with chat.cond:
-                chat.in_request = False
+            chat.end_request()
             raise
         return self.get_reply(chat, wrapped=True)
 
@@ -410,8 +409,6 @@ class Requester:
         s: socket.socket | None = None
         with chat.cond:
             chat.in_request = True
-            if not wrapped:
-                chat.clear_cancel()
         try:
             if wrapped:
                 chat.tool_depth += 1
@@ -559,5 +556,4 @@ class Requester:
         finally:
             if s is not None:
                 s.close()
-            with chat.cond:
-                chat.in_request = False
+            chat.end_request()

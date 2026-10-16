@@ -24,6 +24,11 @@ from .api_key import ApiKey
 class Supervisor:
     """owns the buffers, threads and terminal, and drives the whole chat"""
 
+    STOP_TIMEOUT: float = 2.0
+    BUSY_MESSAGE: str = (
+        "cannot do that while a reply is running; press Ctrl+C to stop it"
+    )
+
     def __init__(
         self,
         open_api: bool = False,
@@ -111,34 +116,66 @@ class Supervisor:
 
     def split(self) -> None:
         """creates new buffer from current"""
-        if self.current_buffer.pending_calls:
+        source = self.current_buffer
+        if source.pending_calls:
             self.show_notification("answer the pending tool calls before splitting")
             return
         new = Buffer()
-        with self.current_buffer.cond:
-            new.chat_data = json.loads(json.dumps(self.current_data))
-            new.visual_data = json.loads(json.dumps(self.current_buffer.visual_data))
-            new.tokens = self.current_buffer.tokens
+        with source.cond:
+            busy = source.in_request or source.queued
+            if not busy:
+                new.chat_data = json.loads(json.dumps(source.chat_data))
+                new.visual_data = json.loads(json.dumps(source.visual_data))
+                new.tokens = source.tokens
+        if busy:
+            self.show_notification(self.BUSY_MESSAGE)
+            return
         self.buffers.append(new)
         self.change_buffer(len(self.buffers) - 1)
 
+    def _stop_request(
+        self, buffer: Buffer, wait: bool = True, timeout: float | None = None
+    ) -> bool:
+        """drop the buffer from the queue and cancel its running request,
+        with wait True returns once the buffer is idle and False on timeout"""
+        self.queue.deschedule(buffer)
+        buffer.cancel_request()
+        if not wait:
+            return True
+        return buffer.wait_idle(self.STOP_TIMEOUT if timeout is None else timeout)
+
+    def _edit(self, buffer: Buffer, edit: Callable[[], bool]) -> bool:
+        """stop the buffer's request and run the edit, notify when it stays busy"""
+        if self._stop_request(buffer) and edit():
+            return True
+        self.show_notification(self.BUSY_MESSAGE)
+        return False
+
     def correct(self) -> None:
         """removes last message"""
-        self.current_buffer.del_msg(1)
+        buffer = self.current_buffer
+        self._edit(buffer, lambda: buffer.del_msg(1))
 
     def redo(self) -> None:
         """regenerate last message"""
-        self.current_buffer.del_msg(2)
-        self.queue.schedule(self.current_buffer)
+        buffer = self.current_buffer
+        if buffer.queued:  # nothing answered yet, the pending request does it
+            return
+        if self._edit(buffer, lambda: buffer.del_msg(2)):
+            self.queue.schedule(buffer)
 
     def start_over(self) -> None:
         """reset current buffer"""
-        self.current_buffer.empty()
+        buffer = self.current_buffer
+        self._edit(buffer, buffer.empty)
 
     def undo(self) -> None:
         """revert last user message"""
-        self.current_buffer.del_msg(3)
-        self.current_buffer.add_msg("user")
+        buffer = self.current_buffer
+        # a queued prompt has no reply and no empty message behind it yet
+        count = 1 if buffer.queued else 3
+        if self._edit(buffer, lambda: buffer.del_msg(count)):
+            buffer.add_msg("user")
 
     def create_buffer(self) -> None:
         """create new blank buffer"""
@@ -158,7 +195,7 @@ class Supervisor:
     def buffer_delete(self) -> None:
         """delete current buffer"""
         old_buffer = self.current_buffer
-        self.queue.deschedule(old_buffer)
+        self._stop_request(old_buffer, wait=False)
         old_buffer.abort_pending()
         self.buffers.pop(self.current_buffer_id)
         if len(self.buffers) == 0:
@@ -239,7 +276,10 @@ class Supervisor:
                 if not self.run:
                     return
                 chat = self.queue.next
-            self.get_reply(chat)
+            try:
+                self.get_reply(chat)
+            finally:
+                chat.end_request()
 
     def watcher(self) -> None:
         """worker thread: dispatch submitted input to commands or to the chat"""

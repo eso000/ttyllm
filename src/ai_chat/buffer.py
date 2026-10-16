@@ -38,7 +38,9 @@ class Buffer:  # pylint: disable=R0902, R0904
         os.set_blocking(self.pipe[0], False)
 
         self.tokens: int = -1
-        self.cond: threading.Condition = threading.Condition()
+        lock = threading.RLock()
+        self.cond: threading.Condition = threading.Condition(lock)
+        self.idle: threading.Condition = threading.Condition(lock)
 
         self.chat_data: dict[str, Any] = {
             "model": "llama3.2",
@@ -266,6 +268,24 @@ class Buffer:  # pylint: disable=R0902, R0904
             self.cancel = True
             os.write(self.pipe[1], b"1")
 
+    def begin_request(self) -> None:
+        """mark the buffer as in request and drop cancels meant for an earlier one"""
+        with self.cond:
+            self.queued = False
+            self.in_request = True
+            self.clear_cancel()
+
+    def end_request(self) -> None:
+        """mark the request as finished and wake everyone waiting for the buffer to idle"""
+        with self.cond:
+            self.in_request = False
+            self.idle.notify_all()
+
+    def wait_idle(self, timeout: float) -> bool:
+        """wait until no request runs, False when the timeout expired first"""
+        with self.cond:
+            return self.idle.wait_for(lambda: not self.in_request, timeout)
+
     def clear_cancel(self) -> None:
         """reset the cancel flag and drain the wakeup pipe"""
         with self.cond:
@@ -331,18 +351,25 @@ class Buffer:  # pylint: disable=R0902, R0904
             self.add_msg("user")
             return True
 
-    def empty(self) -> None:
-        """drop all messages and pending calls, then start over with a system message"""
+    def empty(self) -> bool:
+        """drop all messages and pending calls, then start over with a system message,
+        False and untouched while a reply is queued or running"""
         with self.cond:
+            if self.in_request or self.queued:
+                return False
             self.pending_calls = []
             self.chat_data["messages"] = []
             self.add_msg("system")
             self.updated = True
             self.cond.notify()
+            return True
 
-    def del_msg(self, number: int = 1) -> None:
-        """remove the last number of message groups, tool messages go with them"""
+    def del_msg(self, number: int = 1) -> bool:
+        """remove the last number of message groups, tool messages go with them,
+        False and untouched while a reply is queued or running"""
         with self.cond:
+            if self.in_request or self.queued:
+                return False
             self.pending_calls = []
             for _ in range(min(number, len(self.chat_data["messages"]))):
                 current_role = self.chat_data["messages"][-1]["role"]
@@ -355,6 +382,7 @@ class Buffer:  # pylint: disable=R0902, R0904
 
             self.updated = True
             self.cond.notify()
+            return True
 
     def add_msg(self, role: str) -> None:
         """append an empty message with the given role"""
