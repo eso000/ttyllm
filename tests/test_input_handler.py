@@ -93,6 +93,31 @@ class TestHandleKey(HandlerTestCase):
         self.handler.handle_key("\x02")
         self.assertEqual(len(self.sv.buffers), 2)
 
+    def test_redo_and_undo_run_without_the_ui_lock(self) -> None:
+        """Redo and undo run without the UI lock, they can wait for a request."""
+        for key in (Key.CTRL_R, Key.CTRL_E):
+            with self.subTest(key=key.name):
+                free = []
+
+                def action() -> None:
+                    """Test helper: action."""
+                    taken = []
+
+                    def take() -> None:
+                        """Test helper: take the lock from another thread."""
+                        if self.sv.ui.cond.acquire(timeout=1):
+                            taken.append(True)
+                            self.sv.ui.cond.release()
+
+                    thread = threading.Thread(target=take)
+                    thread.start()
+                    thread.join(2)
+                    free.append(bool(taken))
+
+                self.handler.keys[key] = action
+                self.handler.handle_key(chr(key))
+                self.assertEqual(free, [True])
+
     def test_a_replaced_action_is_used(self) -> None:
         """A replaced action is used."""
         calls = []

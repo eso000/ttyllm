@@ -1003,5 +1003,75 @@ class TestHelp(unittest.TestCase):
         self.assertIn("sm", supervisor.commands.table)
 
 
+class ShortWriteSocket(socket.socket):
+    """Test helper: a socket whose send writes at most 1000 bytes per call."""
+
+    def send(self, data: Any, flags: int = 0, /) -> int:
+        """Test helper: send."""
+        return super().send(bytes(data)[:1000], flags)
+
+
+class TestLargeRequestBody(unittest.TestCase):
+    """Tests for sending a request body that the socket accepts only in parts."""
+
+    def test_whole_body_reaches_the_server(self) -> None:
+        """Whole body reaches the server."""
+        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server.bind(("127.0.0.1", 0))
+        server.listen(1)
+        received: queue.Queue[bytes] = queue.Queue()
+
+        def serve() -> None:
+            """Test helper: serve."""
+            conn, _ = server.accept()
+            conn.settimeout(2)
+            with conn:
+                data = b""
+                while b"\r\n\r\n" not in data:
+                    data += conn.recv(65536)
+                head, _, body = data.partition(b"\r\n\r\n")
+                match = re.search(rb"Content-Length: (\d+)", head)
+                assert match
+                while len(body) < int(match.group(1)):
+                    chunk = conn.recv(65536)
+                    if not chunk:
+                        break
+                    body += chunk
+                received.put(body)
+                conn.sendall(
+                    _http_response(
+                        {
+                            "message": {"content": "ok"},
+                            "done": True,
+                            "prompt_eval_count": 1,
+                            "eval_count": 1,
+                        }
+                    )
+                )
+            server.close()
+
+        thread = threading.Thread(target=serve, daemon=True)
+        thread.start()
+        chat = Buffer()
+        chat.chat_data["messages"][-1] = {
+            "role": "user",
+            "content": "look",
+            "images": ["A" * 20_000],
+        }
+        requester_ = Requester(port=server.getsockname()[1])
+
+        def connect() -> socket.socket:
+            """Test helper: connect."""
+            sock = ShortWriteSocket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.connect(("127.0.0.1", requester_.port))
+            return sock
+
+        with mock.patch.object(requester_, "_connect", connect):
+            self.assertIsNone(requester_.get_reply(chat))
+        thread.join(5)
+        body = json.loads(received.get(timeout=5))
+        self.assertEqual(len(body["messages"][-1]["images"][0]), 20_000)
+
+
 if __name__ == "__main__":
     unittest.main()

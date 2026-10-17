@@ -254,7 +254,7 @@ class Requester:
                     )
                     + "\r\n\r\n"
                 )
-                s.send(request.encode())
+                s.sendall(request.encode())
 
                 raw = self._get_header(s)
                 if raw is None:
@@ -423,7 +423,7 @@ class Requester:
                 request = self.make_post(
                     chat.openai_data if self.open_api else chat.chat_data
                 )
-            s.send(request.encode())
+            s.sendall(request.encode())
 
             chat.add_msg("assistant")
             raw = self._get_header(s, chat.pipe[0])

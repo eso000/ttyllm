@@ -55,6 +55,9 @@ KEY_LABELS: dict[int, str] = {
     Key.TAB: "Tab",
 }
 
+# redo and undo can wait for a request to stop, so they run without the UI lock
+UNLOCKED_KEYS: frozenset[int] = frozenset({Key.CTRL_R, Key.CTRL_E})
+
 # labels whose own action docstring reads poorly as a help line
 KEY_NOTES: dict[str, str] = {
     "Esc": "scroll the view with the arrow keys",
@@ -117,8 +120,11 @@ class InputHandler:
         ):
             sv.decide_tool_call(ch == "y")
             return
+        action = self.keys.get(ord(ch))
+        if action and ord(ch) in UNLOCKED_KEYS:
+            action()
+            return
         with sv.ui.cond:
-            action = self.keys.get(ord(ch))
             if action:
                 action()
             elif ch in ENTER_KEYS:
