@@ -1,155 +1,164 @@
-# ai_chat
+# ai-chat
 
-A minimalist terminal chat client for local LLMs, built with **zero external
-dependencies** — only the Python standard library.
+![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
+![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)
 
-I created this project as a goal to see how far a chat client can be pushed
-without pulling in a single third-party package. To keep everything
-transparent, the HTTP layer is implemented on **raw sockets**: requests are
-assembled and responses (headers, chunked transfer encoding, NDJSON and SSE
-streams) are parsed by hand in
-[`src/ai_chat/requester.py`](src/ai_chat/requester.py), so there is no
-HTTP library standing between you and the wire protocol.
+A terminal chat client for Ollama and OpenAI-compatible servers, using nothing
+but the Python standard library.
+
+I decided to build an AI chat TUI with no dependencies. With no HTTP library,
+[`requester.py`](src/ai_chat/requester.py) builds requests and parses the
+responses by hand: headers, chunked bodies, Ollama's NDJSON and OpenAI's SSE
+streams, TLS. The TUI is a handful of threads talking through condition
+variables, and if you enable tools the model can read files or run shell
+commands, but only after you look at the call and press `y`.
+
+```sh
+pip install -e .
+ai-chat                 # chat with a local Ollama server on 127.0.0.1:11434
+```
 
 ## Features
 
-- **No dependencies** — runs on a stock Python 3.10+ installation.
-- **Raw socket HTTP** — hand-rolled requests, header parsing, chunked
-  decoding, and streaming for both Ollama (`application/x-ndjson`) and
-  OpenAI-compatible (`text/event-stream`) APIs.
-- **Streaming replies** rendered live in a box-drawn TUI.
-- **Multiple buffers** — split, create, switch, and delete independent chats;
-  requests are queued and processed one at a time.
-- **Tool calls** (opt-in) with per-buffer `y`/`n` approval before execution —
-  including shell commands, so see the [security note](#usage) under Usage.
-- **Images** — attach base64-encoded images to the current message.
-- **Model management** — list models from the server, switch models per
-  buffer, tune sampling options.
-- **Configurable endpoint** — point the client at any host with the
-  `-H/--endpoint` flag or the `:endp` command, including `https://` URLs. The
-  scheme is kept, `https://` selects TLS, and `-k/--insecure` allows a
-  self-signed local certificate.
-- **API keys** — send a bearer token on every request from a raw value, an
-  environment variable, or a file (`--api-key`, `--api-key-env`,
-  `--api-key-file`).
-- **Import / export** chats as JSON.
-- **Vim-style command mode** with tab completion (`:`, `/`).
+- **Streaming replies** drawn live in a box-drawn TUI.
+- **Multiple buffers.** Fork, create, switch and delete independent chats.
+  Requests are queued and run one at a time.
+- **Revert and regenerate.** Undo your last message, regenerate the last reply,
+  or remove the last message.
+- **Approval-gated tool calls** (opt-in with `-t`): read a file or run a shell
+  command, each only after you press `y`. See the
+  [security note](#tool-calling-and-safety).
+- **Ollama and OpenAI-compatible backends** (`-o`), including `https://`
+  endpoints and self-signed certificates (`-k`).
+- **API keys** sent as a bearer token, read from an environment variable, a file
+  or the command line.
+- **Models and sampling.** List models from the server, switch per buffer, and
+  tune `top_k`, `top_p`, temperature and repeat penalty.
+- **Images.** Attach a base64-encoded image to the current message.
+- **Import and export** a chat as JSON.
+- **Vim-style command mode** (`:` or `/`) with tab completion of model names and
+  file paths.
 
 ## Requirements
 
 - Python **3.10+**
-- A POSIX terminal (uses `termios`, ANSI escape codes, and the alternate
-  screen buffer)
-- A running LLM server, e.g. [Ollama](https://ollama.com) on
-  `127.0.0.1:11434` (the default)
+- A POSIX terminal (uses `termios`, ANSI escape codes and the alternate screen)
+- A running LLM server, for example [Ollama](https://ollama.com) on
+  `127.0.0.1:11434`, which is the default
 
 ## Usage
 
-Run straight from a checkout (no install needed) with `python3 .`:
-
 ```sh
-python3 .            # chat against the default Ollama endpoint
-python3 . -o         # use an OpenAI-compatible API (/v1/chat/completions)
-python3 . -t         # enable tool calling (asks for approval before running)
-python3 . -H http://127.0.0.1:8080   # point at another server (https selects TLS)
-python3 . -H https://local:8443 -k   # https with a self-signed certificate
-python3 . -o -H https://openrouter.ai/api/v1 --api-key-env OPENROUTER_API_KEY \
-  # bearer key from an environment variable
-python3 . -o --api-key-file ~/.keys/openai   # or read the key from a file
-python3 . --version  # print the version
-python3 . --help     # show all options
+ai-chat                          # Ollama on the default endpoint
+ai-chat -o                       # OpenAI-compatible API (/v1/chat/completions)
+ai-chat -t                       # enable tool calling (asks before running anything)
+ai-chat -H http://127.0.0.1:8080 # another server; https:// selects TLS
+ai-chat -H https://local:8443 -k # https with a self-signed certificate
+ai-chat -o -H https://openrouter.ai/api/v1 --api-key-env OPENROUTER_API_KEY
+ai-chat --help                   # every option
 ```
 
-When set, the API key is sent in an `Authorization: Bearer` header on every
-request. It can come from a raw value (`--api-key KEY`), an environment
-variable (`--api-key-env NAME`) or a file (`--api-key-file PATH`); the three
-flags are mutually exclusive. Prefer the env var or file over `--api-key`,
-because a raw value is visible in process listings and shell history. A key
-source that can't be resolved is silently skipped and no header is sent.
+No install needed: `python3 .` from a checkout takes the same options.
 
-Optionally install it to get the `ai-chat` command (and `python -m ai_chat`):
+Type a message and press <kbd>Enter</kbd>. Start a line with `:` or `/` for
+command mode. `:q` quits and `:h` opens the in-app help.
 
-```sh
-pip install -e .
-ai-chat
-```
+The API key goes in an `Authorization: Bearer` header. Use `--api-key-env` or
+`--api-key-file` rather than `--api-key`, which is visible in process listings
+and shell history. If the key cannot be resolved, no header is sent and the
+server will answer 401.
 
-Type a message and press <kbd>Enter</kbd> to send. Start a line with `:` or
-`/` to enter command mode; `:q` quits, `:h` shows the in-app help.
+### Tool calling and safety
 
-> **⚠️ Shell command execution:** When tool calling is enabled (`-t`), the
-> built-in `run_shell_command` tool can execute arbitrary commands on your
-> machine with your user's permissions. Every tool call is shown with its
-> arguments and must be explicitly approved with <kbd>y</kbd> before it runs,
-> but you should read each command carefully before approving it. Enable `-t`
-> only with models and prompts you trust, and ideally run it inside a sandbox
-> or container.
+With `-t`, the model can call two built-in tools: `read_file` and
+`run_shell_command`. The shell tool runs arbitrary commands with your user's
+permissions.
+
+> **⚠️ Every call is shown with its arguments and runs only after you press
+> <kbd>y</kbd>.** Read each command before approving it. Use `-t` only with
+> models and prompts you trust, ideally inside a sandbox or container.
 
 ### Key bindings
 
-| Key                    | Action                       |
-| ---------------------- | ---------------------------- |
-| <kbd>Ctrl+S</kbd>      | split: fork current buffer   |
-| <kbd>Ctrl+B</kbd>      | create new blank buffer      |
-| <kbd>Ctrl+D</kbd>      | delete current buffer        |
+| Key | Action |
+| --- | ------ |
+| <kbd>Enter</kbd> | send message or command, or leave a view |
+| <kbd>Ctrl+S</kbd> | fork the current buffer |
+| <kbd>Ctrl+B</kbd> | new blank buffer |
+| <kbd>Ctrl+D</kbd> | delete current buffer |
 | <kbd>Ctrl+N</kbd> / <kbd>Ctrl+P</kbd> | next / previous buffer |
-| <kbd>Ctrl+R</kbd>      | regenerate last reply        |
-| <kbd>Ctrl+E</kbd>      | undo last user message       |
-| <kbd>Ctrl+Q</kbd>      | toggle command mode          |
-| <kbd>Ctrl+H</kbd>      | show help                    |
-| <kbd>Ctrl+U</kbd>      | clear input                  |
-| <kbd>Ctrl+C</kbd>      | interrupt request            |
-| <kbd>Tab</kbd>         | complete command / path      |
-| <kbd>↑</kbd> / <kbd>↓</kbd> | scroll view             |
+| <kbd>Ctrl+R</kbd> | regenerate last reply |
+| <kbd>Ctrl+E</kbd> | undo last user message |
+| <kbd>Ctrl+Q</kbd> | open or close the command line |
+| <kbd>Ctrl+H</kbd> | help |
+| <kbd>Ctrl+U</kbd> | clear the input |
+| <kbd>Ctrl+C</kbd> | stop the running reply, or decline pending tool calls |
+| <kbd>Tab</kbd> | complete a model name (`:sm`) or a file path (`:i`, `:e`, `:image`) |
+| <kbd>↑</kbd> / <kbd>↓</kbd> | scroll |
+| <kbd>←</kbd> / <kbd>→</kbd> | jump to the end / top |
 | <kbd>y</kbd> / <kbd>n</kbd> | approve / deny a tool call |
 
-### Commands
+### Common commands
 
-Run with `:h` (or see the table below) inside the app:
+`:h` lists every command with its details. The ones you will use most:
 
 | Command | Description |
 | ------- | ----------- |
-| `:m` / `:mr` | list models / refresh model list |
-| `:sm <model>` | switch model |
-| `:endp <host>[:port] [port]` | show the current endpoint, or set it (`host:port`, two args, or an `http(s)://` URL) |
-| `:n` / `:d` / `:S` | show chat / raw data / system prompt |
-| `:s` / `:bc` / `:bn` / `:bp` / `:bd` | split / create / next / previous / delete buffer |
-| `:r` / `:R` / `:rr` / `-` | regenerate / start over / revert last user message / remove last message |
-| `:ai` / `:us` / `:sys` | change current message role |
-| `:o k\|p\|t\|pen\|stream <value>` | set sampling options (top_k, top_p, temperature, repeat_penalty, stream) |
-| `:v ...` | show or set names and colors |
+| `:m` / `:mr` | list models / refresh the list |
+| `:sm <model>` | switch model for this buffer |
+| `:endp <url or host[:port]>` | show or set the server endpoint |
+| `:o k\|p\|t\|pen\|stream <value>` | sampling options (top_k, top_p, temperature, repeat_penalty, stream) |
+| `:s` / `:bc` / `:bn` / `:bp` / `:bd` | fork / create / next / previous / delete buffer |
+| `:r` / `:rr` / `:R` / `-` | regenerate / undo / start over / remove last message |
 | `:image <file>` / `:rmi` | attach / remove an image |
-| `:i <file>` / `:e <file>` | import / export chat (JSON) |
-| `:h` | help (commands and key bindings) |
+| `:i <file>` / `:e <file>` | import / export the chat as JSON |
 | `:q` | quit |
+
+## How it works
+
+Four threads share the work: one reads the keyboard, one turns submitted lines
+into commands or messages, one talks to the server, and one redraws the screen.
+They hand off through condition variables, and each buffer owns a small pipe
+that the socket reader `select`s on alongside the socket, which is how `Ctrl+C`
+stops a reply mid-stream. Every chat is kept in the Ollama request format and
+converted on the way out for OpenAI-compatible servers, so rendering, import and
+export only ever deal with one shape. Tool calls are reassembled from the
+stream, shown to you, and only the ones you approve get run before the
+conversation continues.
+
+The details, including the raw HTTP layer and the locking rules, are in
+[ARCHITECTURE.md](ARCHITECTURE.md).
+
+## Status and limitations
+
+This is an alpha-quality tool for local use, and its narrow scope is deliberate.
+
+- It targets **Ollama** and **OpenAI-compatible** servers only. It is not a
+  general HTTP client: no redirects, no `Content-Encoding` such as gzip, no
+  keep-alive, no chunk extensions.
+- Success is detected from the exact status line `HTTP/1.1 200 OK` rather than
+  the numeric code, so a server that answers differently is treated as an error.
+- Connections are **IPv4 only**.
+- **POSIX only.** It needs `termios` and ANSI escape codes.
+- Tool calling is opt-in and manually approved, but the shell tool is not
+  sandboxed.
 
 ## Development
 
-Run the test suite:
-
 ```sh
-PYTHONPATH=src python3 -m unittest discover -s tests
+pip install -e ".[dev]"
+black --check src tests
+mypy
+python3 -m unittest discover -s tests
 ```
 
-### Project layout
+The tests use only loopback sockets and need no network. Without installing, run
+`PYTHONPATH=src python3 -m unittest discover -s tests`. CI runs the same three
+checks on every push.
 
-| File                     | Purpose                                              |
-| ------------------------ | ---------------------------------------------------- |
-| `__main__.py`            | runs `ai-chat` from a checkout (`python3 .`)          |
-| `pyproject.toml`         | package metadata, build config, `ai-chat` entry point |
-| `src/ai_chat/cli.py`     | command-line arguments and the `main()` entry point   |
-| `src/ai_chat/__main__.py`| runs `main()` for `python -m ai_chat`                 |
-| `src/ai_chat/supervisor.py` | buffers and their operations, request scheduling, threads |
-| `src/ai_chat/input_handler.py` | keystrokes to commands, line edits, scrolling, approvals |
-| `src/ai_chat/completion.py` | tab completion of model names and file paths      |
-| `src/ai_chat/commands.py` | the `:` / `/` command table and the help screen     |
-| `src/ai_chat/request_queue.py` | serialises reply requests, one buffer at a time |
-| `src/ai_chat/terminal.py` | raw input mode and alternate screen handling        |
-| `src/ai_chat/state.py`   | `UIState`: locked view mode, scroll, command line, notification |
-| `src/ai_chat/view.py`    | renders the buffer for the current `UIState`         |
-| `src/ai_chat/buffer.py`  | per-chat state, messages, and rendering              |
-| `src/ai_chat/requester.py` | raw-socket HTTP client and streaming parsers       |
-| `src/ai_chat/models.py`  | `Model` entries and `ModelList`, the parsed and formatted model list |
-| `src/ai_chat/box_drawing.py` | text box layout and wrapping                     |
-| `src/ai_chat/tool.py` / `src/ai_chat/toolchain.py` | tool definitions and available tools |
-| `tests/`                 | unit tests (unittest, no extra dependencies)         |
+Source files are listed by layer in the
+[component map](ARCHITECTURE.md#component-map).
+
+## License
+
+[MIT](LICENSE)

@@ -3,7 +3,7 @@
 import argparse
 from collections.abc import Sequence
 
-from . import __version__
+from . import __doc__ as DESCRIPTION, __version__
 from .api_key import ApiKey, ApiKeyType
 
 
@@ -11,7 +11,7 @@ def build_parser() -> argparse.ArgumentParser:
     """build the argument parser for the ``ai-chat`` command"""
     parser = argparse.ArgumentParser(
         prog="ai-chat",
-        description="A minimalist terminal chat client for local LLMs.",
+        description=DESCRIPTION,
     )
     parser.add_argument(
         "-t",

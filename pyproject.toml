@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "ai-chat"
 dynamic = ["version"]
-description = "A minimalist terminal chat client for local LLMs, built with zero external dependencies."
+description = "A terminal chat client for Ollama and OpenAI-compatible servers, standard library only."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
