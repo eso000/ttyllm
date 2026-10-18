@@ -108,8 +108,9 @@ flowchart LR
 4. The replies thread calls `Requester.get_reply` for the buffer.
 5. `make_post` builds a raw HTTP/1.1 request and `_connect` opens the socket,
    wrapped in TLS for `https` endpoints.
-6. `_get_header` reads the head, and the body is parsed by content type: NDJSON,
-   SSE or plain JSON.
+6. `_get_header` reads the head, and `get_reply` hands the body to one reader
+   per content type: `_stream_ndjson`, `_stream_sse` or `_read_json`. Each
+   returns whether a tool call arrived.
 7. Frames feed `_handle_msg`, which appends tokens to the buffer and updates token
    counts. Each `add_ai` notifies the render thread.
 8. When the stream ends, `end_request` marks the buffer idle and wakes anything
@@ -135,10 +136,11 @@ flowchart LR
 
 ## Stream dialects
 
-| Backend | Content type           | Frames |
-| ------- | ---------------------- | ------ |
-| Ollama  | `application/x-ndjson` | `message.content`, `done`, `prompt_eval_count` + `eval_count` |
-| OpenAI  | `text/event-stream`    | `choices[0].delta.content`, `finish_reason`, `usage` |
+| Backend | Content type           | Reader           | Frames |
+| ------- | ---------------------- | ---------------- | ------ |
+| Ollama  | `application/x-ndjson` | `_stream_ndjson` | `message.content`, `done`, `prompt_eval_count` + `eval_count` |
+| OpenAI  | `text/event-stream`    | `_stream_sse`    | `choices[0].delta.content`, `finish_reason`, `usage` |
+| Either, with `stream` off | `application/json` | `_read_json` | one whole frame in the backend's format |
 
 Edge cases handled, all taken from observed servers: the trailing usage-only chunk
 with an empty `choices` array, `usage: null` on intermediate chunks, and only the
@@ -214,10 +216,11 @@ export round-trip both as JSON.
 
 ## What I'd fix next
 
-- **`Requester.get_reply` is long and deeply nested.** The NDJSON and SSE paths
-  parse chunk frames from `splitlines()` with size heuristics. Splitting each
-  dialect into its own method, and parsing chunks properly, is the main
-  refactor still open.
+- **The stream readers parse chunk framing inline.** Each content type now has
+  its own reader, but `_stream_ndjson` still finds chunk frames with
+  `splitlines()` and a size heuristic, and `_stream_sse` assumes chunked
+  encoding and that no SSE event spans two chunks. A shared chunked-body reader
+  under both is the main refactor still open.
 - **The status check matches `HTTP/1.1 200 OK`** instead of parsing the numeric
   code, so other success responses are reported as errors.
 - **IPv4 only.** Sockets are created with `AF_INET`.

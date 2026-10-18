@@ -403,6 +403,87 @@ class Requester:
             return (done, tool_calls_collection is None)
         return (done, False)
 
+    def _stream_ndjson(
+        self, s: socket.socket, chat: Buffer, head: str, body_bytes: bytes
+    ) -> bool:
+        """read a chunked NDJSON stream, returns whether a tool call arrived"""
+        call = False
+        body = body_bytes.decode("utf-8", errors="replace").splitlines()
+        done = False
+        while not done and not chat.cancel:
+            body = [x for x in body if x != ""]
+            if len(body) == 0:
+                final = self._recv(s, chat.pipe[0])
+                if final is None:
+                    break
+                body = final.decode("utf-8", errors="replace").splitlines()
+                if len(body) == 0:
+                    continue
+            try:
+                size = int(body[0], 16)
+            except (ValueError, IndexError) as exc:
+                raise ValueError(f"invalid chunk size frame: {body[:1]!r}") from exc
+            if len(body) < 2:
+                raise ValueError("incomplete ndjson frame")
+            if size != len(body[1].encode()) + 1:
+                final = self._get_all(body[1].encode(), size + 2, s, chat.pipe[0])
+                body[1] = final.decode("utf-8", errors="replace").splitlines()[0]
+            done, call = self._handle_msg(chat, json.loads(body[1]))
+            if call:
+                break
+            body.pop(0)
+            body.pop(0)
+        return call
+
+    def _stream_sse(
+        self, s: socket.socket, chat: Buffer, head: str, body_bytes: bytes
+    ) -> bool:
+        """read a chunked SSE stream, returns whether a tool call arrived"""
+        buf = body_bytes
+        done = False
+        tool_calls_collection: dict[Any, dict[str, Any]] = {}
+        while not done and not chat.cancel:
+            # 1. the size line: "1c7\r\n"
+            if b"\r\n" not in buf:
+                data = self._recv(s, chat.pipe[0])
+                if data is None:
+                    break
+                buf += data
+                continue
+            size_line, _, buf = buf.partition(b"\r\n")
+            try:
+                size = int(size_line, 16)
+            except ValueError as exc:
+                raise ValueError(f"invalid chunk size frame: {size_line!r}") from exc
+            if size == 0:  # "0\r\n\r\n" ends the body
+                break
+
+            # 2. exactly `size` bytes of data, plus the "\r\n" after them
+            buf = self._get_all(buf, size + 2, s, chat.pipe[0])
+            chunk, buf = buf[:size], buf[size + 2 :]
+
+            # 3. every event inside this chunk
+            for event in chunk.decode("utf-8", errors="replace").split("\n\n"):
+                if not event.startswith("data:"):
+                    continue
+                if event.startswith("data: [DONE]"):
+                    done = True
+                    break
+                self._handle_msg(chat, json.loads(event[6:]), tool_calls_collection)
+
+        if tool_calls_collection:
+            self._handle_tool_call(chat, list(tool_calls_collection.values()))
+            return True
+        return False
+
+    def _read_json(
+        self, s: socket.socket, chat: Buffer, head: str, body_bytes: bytes
+    ) -> bool:
+        """read a single JSON reply, returns whether a tool call arrived"""
+        body = self._handle_json(s, head, body_bytes, chat.pipe[0])
+        _, call = self._handle_msg(chat, body)
+        return call
+
     def get_reply(self, chat: Buffer, wrapped: bool = False) -> str | None:
         """request a reply, returns an error message when something went wrong"""
         call = False
@@ -438,83 +519,13 @@ class Requester:
                 s.close()
                 return "\n".join([head, body_bytes.decode("utf-8", errors="replace")])
 
-            if "content-type: application/x-ndjson" in head.lower():
-                body = body_bytes.decode("utf-8", errors="replace").splitlines()
-                done = False
-                while not done and not chat.cancel:
-                    body = [x for x in body if x != ""]
-                    if len(body) == 0:
-                        final = self._recv(s, chat.pipe[0])
-                        if final is None:
-                            break
-                        body = final.decode("utf-8", errors="replace").splitlines()
-                        if len(body) == 0:
-                            continue
-                    try:
-                        size = int(body[0], 16)
-                    except (ValueError, IndexError) as exc:
-                        raise ValueError(
-                            f"invalid chunk size frame: {body[:1]!r}"
-                        ) from exc
-                    if len(body) < 2:
-                        raise ValueError("incomplete ndjson frame")
-                    if size != len(body[1].encode()) + 1:
-                        final = self._get_all(
-                            body[1].encode(), size + 2, s, chat.pipe[0]
-                        )
-                        body[1] = final.decode("utf-8", errors="replace").splitlines()[
-                            0
-                        ]
-                    done, call = self._handle_msg(chat, json.loads(body[1]))
-                    if call:
-                        break
-                    body.pop(0)
-                    body.pop(0)
-
-            if "content-type: text/event-stream" in head.lower():
-                buf = body_bytes
-                done = False
-                tool_calls_collection: dict[Any, dict[str, Any]] = {}
-                while not done and not chat.cancel:
-                    # 1. the size line: "1c7\r\n"
-                    if b"\r\n" not in buf:
-                        data = self._recv(s, chat.pipe[0])
-                        if data is None:
-                            break
-                        buf += data
-                        continue
-                    size_line, _, buf = buf.partition(b"\r\n")
-                    try:
-                        size = int(size_line, 16)
-                    except ValueError as exc:
-                        raise ValueError(
-                            f"invalid chunk size frame: {size_line!r}"
-                        ) from exc
-                    if size == 0:  # "0\r\n\r\n" ends the body
-                        break
-
-                    # 2. exactly `size` bytes of data, plus the "\r\n" after them
-                    buf = self._get_all(buf, size + 2, s, chat.pipe[0])
-                    chunk, buf = buf[:size], buf[size + 2 :]
-
-                    # 3. every event inside this chunk
-                    for event in chunk.decode("utf-8", errors="replace").split("\n\n"):
-                        if not event.startswith("data:"):
-                            continue
-                        if event.startswith("data: [DONE]"):
-                            done = True
-                            break
-                        self._handle_msg(
-                            chat, json.loads(event[6:]), tool_calls_collection
-                        )
-
-                if tool_calls_collection:
-                    self._handle_tool_call(chat, list(tool_calls_collection.values()))
-                    call = True
-
-            if "content-type: application/json" in head.lower():
-                body = self._handle_json(s, head, body_bytes, chat.pipe[0])
-                _, call = self._handle_msg(chat, body)
+            content_type = head.lower()
+            if "content-type: application/x-ndjson" in content_type:
+                call = self._stream_ndjson(s, chat, head, body_bytes)
+            elif "content-type: text/event-stream" in content_type:
+                call = self._stream_sse(s, chat, head, body_bytes)
+            elif "content-type: application/json" in content_type:
+                call = self._read_json(s, chat, head, body_bytes)
             s.close()
             if call:
                 if chat.pending_resolved():  # nothing left to ask the user
