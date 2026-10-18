@@ -719,6 +719,24 @@ class TestStreamingUsage(unittest.TestCase):
         self.assertEqual(chat.tokens, 29)
         self.assertEqual(chat.chat_data["messages"][-2]["content"], "Hello")
 
+    def test_events_sharing_one_chunk_are_all_read(self) -> None:
+        """Ollama sends stop, usage and [DONE] in a single chunk."""
+        port, _ = _serve_once(
+            _sse_response(
+                'data: {"choices":[{"delta":{"content":"Hello"},'
+                '"finish_reason":null}]}\n\n',
+                'data: {"choices":[{"delta":{"content":""},"finish_reason":"stop"}]}\n\n'
+                'data: {"choices":[],"usage":{"prompt_tokens":29,'
+                '"completion_tokens":3,"total_tokens":32}}\n\n'
+                "data: [DONE]\n\n",
+            )
+        )
+        chat = Buffer()
+        error = Requester(port=port, open_api=True).get_reply(chat)
+        self.assertIsNone(error)
+        self.assertEqual(chat.tokens, 32)
+        self.assertEqual(chat.chat_data["messages"][-2]["content"], "Hello")
+
     def test_openai_stream_requests_usage(self) -> None:
         """Openai stream requests usage."""
         chat = Buffer()

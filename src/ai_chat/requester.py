@@ -472,52 +472,43 @@ class Requester:
                     body.pop(0)
 
             if "content-type: text/event-stream" in head.lower():
-                body = body_bytes.decode("utf-8", errors="replace").splitlines()
-                finished = False
+                buf = body_bytes
+                done = False
                 tool_calls_collection: dict[Any, dict[str, Any]] = {}
-                while not finished and not chat.cancel:
-                    body = [x for x in body if x != ""]
-
-                    if len(body) == 0:
-                        final = self._recv(s, chat.pipe[0])
-                        if final is None:
+                while not done and not chat.cancel:
+                    # 1. the size line: "1c7\r\n"
+                    if b"\r\n" not in buf:
+                        data = self._recv(s, chat.pipe[0])
+                        if data is None:
                             break
-                        body = final.decode("utf-8", errors="replace").splitlines()
-                        body = [x for x in body if x != ""]
-                        if len(body) == 0:
-                            continue
-                    try:
-                        size = int(body[0], 16)
-                    except (ValueError, IndexError) as exc:
-                        raise ValueError(
-                            f"invalid chunk size frame: {body[:1]!r}"
-                        ) from exc
-
-                    if len(body) >= 2 and size != len(body[1].encode()):
-                        if len(body) >= 3:
-                            final = "\n\n".join(body[1:]).encode()
-                        else:
-                            final = body[1].encode()
-                        final = self._get_all(final, size - 2, s, chat.pipe[0])
-                        body = final.decode("utf-8", errors="replace").splitlines()
-                    else:
-                        body.pop(0)
-                    if len(body) == 0:
+                        buf += data
                         continue
-                    while len(body) > 0 and "data:" in body[0]:
-                        if body[0].startswith("data: [DONE]"):
-                            finished = True
-                            break
-                        _, call = self._handle_msg(
-                            chat, json.loads(body[0][6:]), tool_calls_collection
-                        )
-                        if call:
-                            break
-                        body.pop(0)
-                    if call:
+                    size_line, _, buf = buf.partition(b"\r\n")
+                    try:
+                        size = int(size_line, 16)
+                    except ValueError as exc:
+                        raise ValueError(
+                            f"invalid chunk size frame: {size_line!r}"
+                        ) from exc
+                    if size == 0:  # "0\r\n\r\n" ends the body
                         break
 
-                if len(list(tool_calls_collection.values())) != 0:
+                    # 2. exactly `size` bytes of data, plus the "\r\n" after them
+                    buf = self._get_all(buf, size + 2, s, chat.pipe[0])
+                    chunk, buf = buf[:size], buf[size + 2 :]
+
+                    # 3. every event inside this chunk
+                    for event in chunk.decode("utf-8", errors="replace").split("\n\n"):
+                        if not event.startswith("data:"):
+                            continue
+                        if event.startswith("data: [DONE]"):
+                            done = True
+                            break
+                        self._handle_msg(
+                            chat, json.loads(event[6:]), tool_calls_collection
+                        )
+
+                if tool_calls_collection:
                     self._handle_tool_call(chat, list(tool_calls_collection.values()))
                     call = True
 
