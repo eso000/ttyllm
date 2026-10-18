@@ -152,8 +152,13 @@ mypy
 python3 -m unittest discover -s tests
 ```
 
-The tests use only loopback sockets and need no network. Without installing, run
-`PYTHONPATH=src python3 -m unittest discover -s tests`. CI runs the same three
+Or run the tests without installing, by pointing Python at `src/`:
+
+```sh
+PYTHONPATH=src python3 -m unittest discover -s tests
+```
+
+The tests use only loopback sockets and need no network. CI runs the same three
 checks on every push.
 
 Source files are listed by layer in the
