@@ -1,5 +1,6 @@
 # ttyllm
 
+[![CI](https://github.com/eso000/ttyllm/actions/workflows/ci.yml/badge.svg)](https://github.com/eso000/ttyllm/actions/workflows/ci.yml)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
 ![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)
 
