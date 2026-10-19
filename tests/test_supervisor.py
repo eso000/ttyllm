@@ -1,5 +1,9 @@
 """Tests for the supervisor: buffers, threads and lifecycle."""
 
+# annotations stay unevaluated: mock._patch[...] is only subscriptable at
+# runtime on 3.14+, and older versions evaluate annotations when the class runs
+from __future__ import annotations
+
 import contextlib
 import io
 import os
