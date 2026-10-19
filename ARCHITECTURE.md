@@ -1,6 +1,6 @@
 # Architecture
 
-How `ai-chat` is put together: the threads, the request lifecycle, the raw HTTP
+How `ttyllm` is put together: the threads, the request lifecycle, the raw HTTP
 layer and the tool-calling loop. For installation and usage, see the
 [README](README.md).
 

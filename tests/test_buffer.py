@@ -3,7 +3,7 @@
 import unittest
 from typing import Any
 
-from ai_chat.buffer import Buffer
+from ttyllm.buffer import Buffer
 
 DEFAULT_MODEL = "llama3.2"
 

@@ -2,8 +2,8 @@
 
 import unittest
 
-from ai_chat.box_drawing import make_text_box, text_to_lines
-from ai_chat.buffer import Buffer, ColorCodeException
+from ttyllm.box_drawing import make_text_box, text_to_lines
+from ttyllm.buffer import Buffer, ColorCodeException
 
 SAMPLES: list[str] = [
     "hi there friend",

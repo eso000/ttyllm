@@ -1,6 +1,6 @@
-"""Enable ``python -m ai_chat``.
+"""Enable ``python -m ttyllm``.
 
-Also works when this file is executed directly (``python src/ai_chat/``), in
+Also works when this file is executed directly (``python src/ttyllm/``), in
 which case there is no package context and the import has to be bootstrapped.
 """
 
@@ -11,6 +11,6 @@ else:  # pragma: no cover - only hit when run as a bare script
     import sys
 
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from ai_chat.cli import main
+    from ttyllm.cli import main
 
 raise SystemExit(main())

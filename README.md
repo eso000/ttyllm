@@ -1,4 +1,4 @@
-# ai-chat
+# ttyllm
 
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
 ![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)
@@ -7,7 +7,7 @@ A terminal chat client for Ollama and OpenAI-compatible servers, using nothing
 but the Python standard library.
 
 I decided to build an AI chat TUI with no dependencies. With no HTTP library,
-[`requester.py`](src/ai_chat/requester.py) builds requests and parses the
+[`requester.py`](src/ttyllm/requester.py) builds requests and parses the
 responses by hand: headers, chunked bodies, Ollama's NDJSON and OpenAI's SSE
 streams, TLS. The TUI is a handful of threads talking through condition
 variables, and if you enable tools the model can read files or run shell
@@ -15,7 +15,7 @@ commands, but only after you look at the call and press `y`.
 
 ```sh
 pip install -e .
-ai-chat                 # chat with a local Ollama server on 127.0.0.1:11434
+ttyllm                 # chat with a local Ollama server on 127.0.0.1:11434
 ```
 
 ## Features
@@ -49,13 +49,13 @@ ai-chat                 # chat with a local Ollama server on 127.0.0.1:11434
 ## Usage
 
 ```sh
-ai-chat                          # Ollama on the default endpoint
-ai-chat -o                       # OpenAI-compatible API (/v1/chat/completions)
-ai-chat -t                       # enable tool calling (asks before running anything)
-ai-chat -H http://127.0.0.1:8080 # another server; https:// selects TLS
-ai-chat -H https://local:8443 -k # https with a self-signed certificate
-ai-chat -o -H https://openrouter.ai/api/v1 --api-key-env OPENROUTER_API_KEY
-ai-chat --help                   # every option
+ttyllm                          # Ollama on the default endpoint
+ttyllm -o                       # OpenAI-compatible API (/v1/chat/completions)
+ttyllm -t                       # enable tool calling (asks before running anything)
+ttyllm -H http://127.0.0.1:8080 # another server; https:// selects TLS
+ttyllm -H https://local:8443 -k # https with a self-signed certificate
+ttyllm -o -H https://openrouter.ai/api/v1 --api-key-env OPENROUTER_API_KEY
+ttyllm --help                   # every option
 ```
 
 No install needed: `python3 .` from a checkout takes the same options.

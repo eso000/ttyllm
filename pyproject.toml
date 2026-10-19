@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "ai-chat"
+name = "ttyllm"
 dynamic = ["version"]
 description = "A terminal chat client for Ollama and OpenAI-compatible servers, standard library only."
 readme = "README.md"
@@ -33,13 +33,13 @@ dependencies = []
 dev = ["black>=26.5,<27", "mypy>=1.11"]
 
 [project.scripts]
-ai-chat = "ai_chat.cli:main"
+ttyllm = "ttyllm.cli:main"
 
 [tool.hatch.version]
-path = "src/ai_chat/__init__.py"
+path = "src/ttyllm/__init__.py"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/ai_chat"]
+packages = ["src/ttyllm"]
 
 [tool.black]
 target-version = ["py310"]

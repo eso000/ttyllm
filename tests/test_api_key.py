@@ -6,7 +6,7 @@ import unittest
 from contextlib import contextmanager
 from unittest import mock
 
-from ai_chat.api_key import ApiKey, ApiKeyType
+from ttyllm.api_key import ApiKey, ApiKeyType
 
 
 @contextmanager

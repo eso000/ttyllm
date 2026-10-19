@@ -9,13 +9,13 @@ import unittest
 from typing import Any
 from unittest import mock
 
-from ai_chat import supervisor as supervisor_module
-from ai_chat import view as view_module
-from ai_chat.buffer import Buffer
-from ai_chat.requester import Requester
-from ai_chat.request_queue import RequestQueue
-from ai_chat.state import ViewMode
-from ai_chat.supervisor import Supervisor
+from ttyllm import supervisor as supervisor_module
+from ttyllm import view as view_module
+from ttyllm.buffer import Buffer
+from ttyllm.requester import Requester
+from ttyllm.request_queue import RequestQueue
+from ttyllm.state import ViewMode
+from ttyllm.supervisor import Supervisor
 from test_requester import _http_response, _serve_once
 
 

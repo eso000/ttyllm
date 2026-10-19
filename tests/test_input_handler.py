@@ -8,12 +8,12 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from unittest import mock
 
-from ai_chat import view as view_module
-from ai_chat.input_handler import KEY_LABELS, InputHandler, Key
-from ai_chat.models import Model, ModelList
+from ttyllm import view as view_module
+from ttyllm.input_handler import KEY_LABELS, InputHandler, Key
+from ttyllm.models import Model, ModelList
 from test_input_keys import content, press
-from ai_chat.state import ViewMode
-from ai_chat.supervisor import Supervisor
+from ttyllm.state import ViewMode
+from ttyllm.supervisor import Supervisor
 
 
 @contextmanager

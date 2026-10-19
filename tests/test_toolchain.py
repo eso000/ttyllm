@@ -4,7 +4,7 @@ import os
 import tempfile
 import unittest
 
-from ai_chat.toolchain import read_file
+from ttyllm.toolchain import read_file
 
 
 class TestReadFile(unittest.TestCase):

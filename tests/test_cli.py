@@ -3,10 +3,10 @@
 import unittest
 from unittest import mock
 
-from ai_chat import cli
-from ai_chat.requester import Requester
-from ai_chat.supervisor import Supervisor
-from ai_chat.api_key import ApiKey, ApiKeyType
+from ttyllm import cli
+from ttyllm.requester import Requester
+from ttyllm.supervisor import Supervisor
+from ttyllm.api_key import ApiKey, ApiKeyType
 
 
 class TestParser(unittest.TestCase):

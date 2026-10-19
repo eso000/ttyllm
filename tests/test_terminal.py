@@ -9,7 +9,7 @@ import termios
 import unittest
 from unittest import mock
 
-from ai_chat.terminal import raw_terminal
+from ttyllm.terminal import raw_terminal
 
 
 class TestRawTerminal(unittest.TestCase):

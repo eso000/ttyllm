@@ -10,12 +10,12 @@ from collections.abc import Callable, Iterator
 from typing import Any
 from unittest import mock
 
-from ai_chat import supervisor as supervisor_module
-from ai_chat import view as view_module
-from ai_chat.buffer import Buffer
-from ai_chat.models import Model, ModelList
-from ai_chat.requester import Requester
-from ai_chat.supervisor import Supervisor
+from ttyllm import supervisor as supervisor_module
+from ttyllm import view as view_module
+from ttyllm.buffer import Buffer
+from ttyllm.models import Model, ModelList
+from ttyllm.requester import Requester
+from ttyllm.supervisor import Supervisor
 from test_input_handler import stdin_with
 
 
@@ -479,7 +479,7 @@ class TestResize(unittest.TestCase):
 
     def _resize(self, columns: int, lines: int) -> None:
         """Test helper: resize."""
-        with mock.patch("ai_chat.state.shutil.get_terminal_size") as size:
+        with mock.patch("ttyllm.state.shutil.get_terminal_size") as size:
             size.return_value = os.terminal_size((columns, lines))
             self.sv.handle_sigwinch(signal.SIGWINCH, None)
 

@@ -5,11 +5,11 @@ import unittest
 from typing import Any
 from unittest import mock
 
-from ai_chat import view as view_module
-from ai_chat.buffer import Buffer
-from ai_chat.models import Model, ModelList
-from ai_chat.state import ViewMode
-from ai_chat.supervisor import Supervisor
+from ttyllm import view as view_module
+from ttyllm.buffer import Buffer
+from ttyllm.models import Model, ModelList
+from ttyllm.state import ViewMode
+from ttyllm.supervisor import Supervisor
 
 
 def _text(box: Any) -> str:

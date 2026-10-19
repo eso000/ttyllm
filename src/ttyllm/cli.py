@@ -8,9 +8,9 @@ from .api_key import ApiKey, ApiKeyType
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """build the argument parser for the ``ai-chat`` command"""
+    """build the argument parser for the ``ttyllm`` command"""
     parser = argparse.ArgumentParser(
-        prog="ai-chat",
+        prog="ttyllm",
         description=DESCRIPTION,
     )
     parser.add_argument(

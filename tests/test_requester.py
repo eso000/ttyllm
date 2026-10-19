@@ -15,14 +15,14 @@ import unittest
 from typing import Any
 from unittest import mock
 
-from ai_chat import requester
-from ai_chat.models import Model, ModelList
-from ai_chat.requester import Requester
-from ai_chat.commands import Commands
-from ai_chat.state import UIState
-from ai_chat.supervisor import Supervisor
-from ai_chat.buffer import Buffer
-from ai_chat.api_key import ApiKey, ApiKeyType
+from ttyllm import requester
+from ttyllm.models import Model, ModelList
+from ttyllm.requester import Requester
+from ttyllm.commands import Commands
+from ttyllm.state import UIState
+from ttyllm.supervisor import Supervisor
+from ttyllm.buffer import Buffer
+from ttyllm.api_key import ApiKey, ApiKeyType
 
 GIB = 1073741824
 
@@ -453,7 +453,7 @@ class TestConnect(unittest.TestCase):
     def test_plain_connection_is_returned_as_is(self) -> None:
         """Plain connection is returned as is."""
         request = Requester(host="127.0.0.1", port=11434)
-        with mock.patch("ai_chat.requester.socket.socket") as socket_mock:
+        with mock.patch("ttyllm.requester.socket.socket") as socket_mock:
             raw = socket_mock.return_value
             self.assertIs(request._connect(), raw)
         raw.connect.assert_called_once_with(("127.0.0.1", 11434))
@@ -462,8 +462,8 @@ class TestConnect(unittest.TestCase):
         """Tls connection is wrapped with the server name."""
         request = Requester(host="api.example.com", port=443, tls=True)
         with (
-            mock.patch("ai_chat.requester.socket.socket") as socket_mock,
-            mock.patch("ai_chat.requester.ssl.create_default_context") as context_mock,
+            mock.patch("ttyllm.requester.socket.socket") as socket_mock,
+            mock.patch("ttyllm.requester.ssl.create_default_context") as context_mock,
         ):
             raw = socket_mock.return_value
             wrapped = context_mock.return_value.wrap_socket.return_value
@@ -476,8 +476,8 @@ class TestConnect(unittest.TestCase):
         """Tls context is built once."""
         request = Requester(host="api.example.com", tls=True)
         with (
-            mock.patch("ai_chat.requester.socket.socket"),
-            mock.patch("ai_chat.requester.ssl.create_default_context") as context_mock,
+            mock.patch("ttyllm.requester.socket.socket"),
+            mock.patch("ttyllm.requester.ssl.create_default_context") as context_mock,
         ):
             request._connect()
             request._connect()
@@ -494,8 +494,8 @@ class TestConnect(unittest.TestCase):
         """Raw socket is closed when wrapping fails."""
         request = Requester(host="api.example.com", tls=True)
         with (
-            mock.patch("ai_chat.requester.socket.socket") as socket_mock,
-            mock.patch("ai_chat.requester.ssl.create_default_context") as context_mock,
+            mock.patch("ttyllm.requester.socket.socket") as socket_mock,
+            mock.patch("ttyllm.requester.ssl.create_default_context") as context_mock,
         ):
             raw = socket_mock.return_value
             context_mock.return_value.wrap_socket.side_effect = OSError("tls failed")
@@ -637,7 +637,7 @@ class TestReplyErrors(unittest.TestCase):
         """Socket is closed when connect fails."""
         chat = Buffer()
         request = Requester(port=_closed_port())
-        with mock.patch("ai_chat.requester.socket.socket") as socket_mock:
+        with mock.patch("ttyllm.requester.socket.socket") as socket_mock:
             socket_mock.return_value.connect.side_effect = OSError("refused")
             error = request.get_reply(chat)
         self.assertIn("OSError", error)  # type: ignore[arg-type]

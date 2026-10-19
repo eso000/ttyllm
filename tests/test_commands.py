@@ -8,11 +8,11 @@ import threading
 import unittest
 from unittest import mock
 
-from ai_chat.commands import Commands, _first_line, _rest_lines
-from ai_chat.models import Model
-from ai_chat.requester import Requester
-from ai_chat.state import ViewMode
-from ai_chat.supervisor import Supervisor
+from ttyllm.commands import Commands, _first_line, _rest_lines
+from ttyllm.models import Model
+from ttyllm.requester import Requester
+from ttyllm.state import ViewMode
+from ttyllm.supervisor import Supervisor
 
 
 class CommandsTestCase(unittest.TestCase):

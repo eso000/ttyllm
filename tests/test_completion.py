@@ -4,7 +4,7 @@ import os
 import tempfile
 import unittest
 
-from ai_chat.completion import candidates, complete
+from ttyllm.completion import candidates, complete
 
 MODELS = ["llama3.2", "llama3.1", "mistral"]
 

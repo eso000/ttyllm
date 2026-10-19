@@ -5,7 +5,7 @@ import threading
 import unittest
 from unittest import mock
 
-from ai_chat.state import UIState, ViewMode
+from ttyllm.state import UIState, ViewMode
 
 
 class TestDefaults(unittest.TestCase):
@@ -31,7 +31,7 @@ class TestTerminalSize(unittest.TestCase):
 
     def test_from_terminal_reads_the_size(self) -> None:
         """From terminal reads the size."""
-        with mock.patch("ai_chat.state.shutil.get_terminal_size") as size:
+        with mock.patch("ttyllm.state.shutil.get_terminal_size") as size:
             size.return_value = os.terminal_size((120, 40))
             ui = UIState.from_terminal()
         self.assertEqual((ui.columns, ui.lines), (120, 40))
@@ -39,7 +39,7 @@ class TestTerminalSize(unittest.TestCase):
     def test_resize_picks_up_a_new_size(self) -> None:
         """Resize picks up a new size."""
         ui = UIState()
-        with mock.patch("ai_chat.state.shutil.get_terminal_size") as size:
+        with mock.patch("ttyllm.state.shutil.get_terminal_size") as size:
             size.return_value = os.terminal_size((60, 20))
             ui.resize()
         self.assertEqual((ui.columns, ui.lines), (60, 20))

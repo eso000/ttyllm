@@ -4,10 +4,10 @@ import unittest
 from typing import Any
 from unittest import mock
 
-from ai_chat import toolchain
-from ai_chat.buffer import Buffer
-from ai_chat.requester import Requester
-from ai_chat.tool import Parameter, Tool
+from ttyllm import toolchain
+from ttyllm.buffer import Buffer
+from ttyllm.requester import Requester
+from ttyllm.tool import Parameter, Tool
 from test_requester import _http_response, _serve_once
 
 
