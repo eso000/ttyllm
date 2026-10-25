@@ -139,6 +139,19 @@ conversation continues.
 The details, including the raw HTTP layer and the locking rules, are in
 [ARCHITECTURE.md](ARCHITECTURE.md).
 
+## How it was built
+
+This is a hobby project, and the hand-written HTTP layer in
+[`requester.py`](src/ttyllm/requester.py) is part of the fun. I sent requests to
+Ollama and OpenAI-compatible servers with `curl`, read the raw responses, and
+wrote a parser for what came back. It handles what those servers were observed
+to send, not everything the specs allow, which is why the
+[limitations](#status-and-limitations) below look the way they do.
+
+For real work I would use `http.client` or `urllib` from the standard library,
+`httpx` or `requests`, or the official `openai` or Ollama clients. They handle
+redirects, compression, keep-alive and the edge cases this code does not.
+
 ## Status and limitations
 
 This is an alpha-quality tool for local use, and its narrow scope is deliberate.
