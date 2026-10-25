@@ -228,7 +228,7 @@ class Supervisor:
         return problem is not None
 
     def set_endpoint(self, *args: str) -> None:
-        """show or set the server endpoint -- arguments: host[:port] [port]"""
+        """show or set the server endpoint -- arguments: base URL or host[:port] [port]"""
         parts = [arg for arg in args if arg]  # ignore empty tokens after the name
         if len(parts) == 0:
             self.show_notification(f"endpoint: {self.requester.endpoint}")
@@ -242,7 +242,7 @@ class Supervisor:
                     raise ValueError(f"port {port} out of range")
                 self.requester.set_endpoint((parts[0], port))
             else:
-                self.show_notification("usage: :endp host[:port] [port]")
+                self.show_notification("usage: :endp <base URL or host[:port]>")
                 return
         except ValueError as error:
             self.show_notification(f"invalid endpoint: {error}")

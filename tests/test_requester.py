@@ -54,6 +54,11 @@ def _sse_response(*events: str) -> bytes:
     return head + chunks + b"0\r\n\r\n"
 
 
+def _post_line(request: Requester) -> str:
+    """the request line of a POST for an empty chat body"""
+    return request.make_post({"model": "m", "messages": []}).split("\r\n", 1)[0]
+
+
 def _serve_once(response: bytes) -> tuple[int, threading.Thread]:
     """start a one-shot http server, return its port"""
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -445,6 +450,83 @@ class TestEndpoint(unittest.TestCase):
         request = Requester()
         request.set_endpoint("otherhost")
         self.assertEqual(request.endpoint, f"otherhost:{request.port}")
+
+    def test_url_path_is_kept_as_the_api_base(self) -> None:
+        """Url path is kept as the api base."""
+        request = Requester()
+        request.set_endpoint("https://openrouter.ai/api/v1")
+        self.assertEqual(request.base_path, "/api/v1")
+
+    def test_trailing_slash_is_removed_from_the_path(self) -> None:
+        """Trailing slash is removed from the path."""
+        request = Requester()
+        request.set_endpoint("https://openrouter.ai/api/v1/")
+        self.assertEqual(request.base_path, "/api/v1")
+
+    def test_endpoint_without_a_path_clears_the_base(self) -> None:
+        """Endpoint without a path clears the base."""
+        request = Requester()
+        request.set_endpoint("https://openrouter.ai/api/v1")
+        request.set_endpoint("https://openrouter.ai")
+        self.assertIsNone(request.base_path)
+
+    def test_tuple_endpoint_clears_the_base(self) -> None:
+        """Tuple endpoint clears the base."""
+        request = Requester()
+        request.set_endpoint("https://openrouter.ai/api/v1")
+        request.set_endpoint(("127.0.0.1", 11434))
+        self.assertIsNone(request.base_path)
+
+    def test_scheme_less_path_is_shown(self) -> None:
+        """Scheme less path is shown."""
+        request = Requester(port=11434)
+        request.set_endpoint("localhost:11434/api/v1")
+        self.assertEqual(request.endpoint, "localhost:11434/api/v1")
+
+
+class TestRequestTargets(unittest.TestCase):
+    """Tests for request target composition."""
+
+    def test_openrouter_chat_path_is_used(self) -> None:
+        """Openrouter chat path is used."""
+        request = Requester(open_api=True)
+        request.set_endpoint("https://openrouter.ai/api/v1")
+        self.assertEqual(_post_line(request), "POST /api/v1/chat/completions HTTP/1.1")
+
+    def test_openai_v1_is_not_doubled(self) -> None:
+        """Openai v1 is not doubled."""
+        request = Requester(open_api=True)
+        request.set_endpoint("https://api.openai.com/v1")
+        self.assertEqual(_post_line(request), "POST /v1/chat/completions HTTP/1.1")
+
+    def test_openai_without_a_path_uses_v1(self) -> None:
+        """Openai without a path uses v1."""
+        request = Requester(open_api=True)
+        request.set_endpoint("https://api.openai.com")
+        self.assertEqual(_post_line(request), "POST /v1/chat/completions HTTP/1.1")
+
+    def test_ollama_without_a_path_uses_api(self) -> None:
+        """Ollama without a path uses api."""
+        request = Requester()
+        request.set_endpoint("http://127.0.0.1:11434")
+        self.assertEqual(_post_line(request), "POST /api/chat HTTP/1.1")
+
+    def test_ollama_uses_the_configured_base(self) -> None:
+        """Ollama uses the configured base."""
+        request = Requester()
+        request.set_endpoint("https://example.com/ollama/api")
+        self.assertEqual(_post_line(request), "POST /ollama/api/chat HTTP/1.1")
+
+    def test_models_request_uses_the_configured_base(self) -> None:
+        """Models request uses the configured base."""
+        port, _, received = _serve_capture(_http_response({"data": [{"id": "m"}]}))
+        request = Requester(open_api=True)
+        request.set_endpoint(f"http://127.0.0.1:{port}/api/v1")
+        self.assertEqual(list(request.get_models()), [Model("m")])
+        self.assertEqual(
+            received.get(timeout=5).split(b"\r\n", 1)[0],
+            b"GET /api/v1/models HTTP/1.1",
+        )
 
 
 class TestConnect(unittest.TestCase):

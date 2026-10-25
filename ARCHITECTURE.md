@@ -118,9 +118,12 @@ flowchart LR
 
 ## The raw HTTP layer
 
-- **Request** (`make_post`): a hand-built request line (`POST /api/chat` for
-  Ollama, `POST /v1/chat/completions` for OpenAI), `HOST`, `Content-Type`,
-  `Content-Length`, and `Authorization: Bearer` when a key resolves.
+- **Request** (`make_post`): a hand-built request line. The target is
+  `<api-base>/chat/completions` for OpenAI and `<api-base>/chat` for Ollama,
+  where `<api-base>` defaults to `/v1` or `/api` and includes any path from the
+  configured endpoint. `get_models` uses `<api-base>/models` or
+  `<api-base>/tags`. `HOST`, `Content-Type`, `Content-Length`, and
+  `Authorization: Bearer` follow.
 - **Connect** (`_connect`): TCP with a connect timeout, wrapped in TLS through a
   cached `ssl` context. `-k` turns off verification for self-signed certificates.
 - **Receive** (`_recv`): `select` with a read timeout, plus the buffer's

@@ -23,15 +23,15 @@ def build_parser() -> argparse.ArgumentParser:
         "-o",
         "--open-api",
         action="store_true",
-        help="use an OpenAI-compatible API (/v1/chat/completions)",
+        help="use an OpenAI-compatible API; its base path defaults to /v1",
     )
     parser.add_argument(
         "-H",
         "--endpoint",
-        metavar="URL[:PORT]",
+        metavar="BASE_URL",
         help=(
-            "server endpoint, e.g. 127.0.0.1:11434 or https://api.example.com:443 "
-            "(https selects TLS)"
+            "server base URL, e.g. 127.0.0.1:11434 or "
+            "https://openrouter.ai/api/v1 (https selects TLS; the path is kept)"
         ),
     )
     parser.add_argument(

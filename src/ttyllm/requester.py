@@ -40,25 +40,27 @@ class Requester:
         self.tls: bool = tls
         self.tls_verify: bool = tls_verify
         self.api_key: ApiKey | None = api_key
+        self.base_path: str | None = None
         self._endpoint: str = f"{host}:{port}"
         self._tls_context: ssl.SSLContext | None = None
         self.models_error: str | None = None
 
     @property
     def endpoint(self) -> str:
-        """the endpoint as it was entered, "https://local:99" or "127.0.0.1:11434" """
+        """the endpoint as entered; scheme-less tokens show the effective path too"""
         return self._endpoint
 
     def set_endpoint(self, endpoint: tuple[str, int] | str) -> None:
-        """point the client at a new host, accepting a URL or a (host, port) tuple
+        """point the client at a new base URL or (host, port) tuple
 
         a scheme only selects the transport: "https://..." turns TLS on and
         defaults to port 443, while "http://..." stays plain and defaults to port
         80. A token without a scheme keeps the current port and TLS, so
-        "localhost:11434" behaves like the (host, port) tuple form.
+        "localhost:11434" behaves like the (host, port) tuple form. A path is
+        kept as the API base and reset by an endpoint without one.
         """
         if isinstance(endpoint, str):
-            parsed = urlsplit(endpoint if "//" in endpoint else f"//{endpoint}")
+            parsed = urlsplit(endpoint if "://" in endpoint else f"//{endpoint}")
             if parsed.scheme:
                 self.tls = parsed.scheme == "https"
                 default_port = 443 if self.tls else 80
@@ -68,13 +70,18 @@ class Requester:
                 port = parsed.port
             except ValueError as error:
                 raise ValueError(f"invalid endpoint {endpoint!r}: {error}") from error
+            path = parsed.path.rstrip("/")
             self.host = parsed.hostname or self.host
             self.port = port or default_port
-            self._endpoint = endpoint if parsed.scheme else f"{self.host}:{self.port}"
+            self.base_path = path or None
+            self._endpoint = (
+                endpoint if parsed.scheme else f"{self.host}:{self.port}{path}"
+            )
             return
         host, port = endpoint
         self.host = host
         self.port = port
+        self.base_path = None
         self._endpoint = f"{host}:{port}"
 
     def _ssl_context(self) -> ssl.SSLContext:
@@ -124,15 +131,16 @@ class Requester:
         key = self.api_key.get_key() if self.api_key is not None else None
         return [f"Authorization: Bearer {key}"] if key is not None else []
 
+    def _api_base(self) -> str:
+        """the configured API base, or the backend default"""
+        return self.base_path or ("/v1" if self.open_api else "/api")
+
     def make_post(self, d: dict[str, Any]) -> str:
         """assemble a raw HTTP/1.1 POST request with a JSON body"""
         body = json.dumps(d)
+        route = "chat/completions" if self.open_api else "chat"
         headers = [
-            (
-                "POST /v1/chat/completions HTTP/1.1"
-                if self.open_api
-                else "POST /api/chat HTTP/1.1"
-            ),
+            f"POST {self._api_base()}/{route} HTTP/1.1",
             f"HOST: {self.host}",
             "Content-Type: application/json",
             f"Content-Length: {len(body)}",
@@ -243,7 +251,8 @@ class Requester:
         self.models_error = None
         try:
             with self._connect() as s:
-                path = "/v1/models" if self.open_api else "/api/tags"
+                route = "models" if self.open_api else "tags"
+                path = f"{self._api_base()}/{route}"
                 request = (
                     "\r\n".join(
                         [

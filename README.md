@@ -51,13 +51,22 @@ ttyllm                 # chat with a local Ollama server on 127.0.0.1:11434
 
 ```sh
 ttyllm                          # Ollama on the default endpoint
-ttyllm -o                       # OpenAI-compatible API (/v1/chat/completions)
+ttyllm -o                       # OpenAI-compatible API (base path defaults to /v1)
 ttyllm -t                       # enable tool calling (asks before running anything)
 ttyllm -H http://127.0.0.1:8080 # another server; https:// selects TLS
 ttyllm -H https://local:8443 -k # https with a self-signed certificate
+ttyllm -H https://example.com/ollama/api  # Ollama behind a reverse proxy
 ttyllm -o -H https://openrouter.ai/api/v1 --api-key-env OPENROUTER_API_KEY
 ttyllm --help                   # every option
 ```
+
+`-H` takes a base URL, not just a host. The path is preserved and used as the
+API base:
+
+- With `-o`, requests go to `<base>/chat/completions` and `<base>/models`,
+  defaulting to `/v1`. Use the full base, such as `/api/v1` for OpenRouter.
+- Without `-o`, requests go to `<base>/chat` and `<base>/tags`, defaulting to
+  `/api`.
 
 No install needed: `python3 .` from a checkout takes the same options.
 
@@ -107,7 +116,7 @@ permissions.
 | ------- | ----------- |
 | `:m` / `:mr` | list models / refresh the list |
 | `:sm <model>` | switch model for this buffer |
-| `:endp <url or host[:port]>` | show or set the server endpoint |
+| `:endp <base url or host[:port]>` | show or set the server endpoint |
 | `:o k\|p\|t\|pen\|stream <value>` | sampling options (top_k, top_p, temperature, repeat_penalty, stream) |
 | `:s` / `:bc` / `:bn` / `:bp` / `:bd` | fork / create / next / previous / delete buffer |
 | `:r` / `:rr` / `:R` / `-` | regenerate / undo / start over / remove last message |
