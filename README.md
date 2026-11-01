@@ -14,6 +14,8 @@ streams, TLS. The TUI is a handful of threads talking through condition
 variables, and if you enable tools the model can read files or run shell
 commands, but only after you look at the call and press `y`.
 
+![ttyllm demo: streaming a reply, opening help, forking and regenerating a reply, and switching buffers](assets/readme_demo.gif)
+
 ```sh
 pip install -e .
 ttyllm                 # chat with a local Ollama server on 127.0.0.1:11434
@@ -183,6 +185,11 @@ PYTHONPATH=src python3 -m unittest discover -s tests
 
 The tests use only loopback sockets and need no network. CI runs the same three
 checks on every push.
+
+The README demo is recorded with [VHS](https://github.com/charmbracelet/vhs)
+from [`doc/demo.tape`](doc/demo.tape). Regenerate it from the repository root
+with `vhs doc/demo.tape`; this needs VHS, an installed `ttyllm`, and a running
+Ollama server.
 
 Source files are listed by layer in the
 [component map](ARCHITECTURE.md#component-map).
